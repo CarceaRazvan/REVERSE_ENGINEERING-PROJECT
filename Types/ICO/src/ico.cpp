@@ -68,6 +68,11 @@ extern "C"
         ico->Update();
 
         // add viewer
+
+        GView::View::YaraViewer::Settings settings;
+        settings.SetAnalysisLevel(3);
+        win->CreateViewer(settings);
+
         CreateImageView(win, ico);
         CreateBufferView(win, ico);
 
