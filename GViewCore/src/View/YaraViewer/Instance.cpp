@@ -249,12 +249,14 @@ void Instance::Paint(Graphics::Renderer& renderer)
 bool Instance::OnUpdateCommandBar(Application::CommandBar& commandBar)
 {
     commandBar.SetCommand(Commands::SomeCommand.Key, Commands::SomeCommand.Caption, Commands::SomeCommand.CommandId);
+    commandBar.SetCommand(Commands::SomeCommandViewRules.Key, Commands::SomeCommandViewRules.Caption, Commands::SomeCommandViewRules.CommandId);
     return false;
 }
 
 bool Instance::UpdateKeys(KeyboardControlsInterface* interfaceParam)
 {
     interfaceParam->RegisterKey(&Commands::SomeCommand);
+    interfaceParam->RegisterKey(&Commands::SomeCommandViewRules);
     return true;
 }
 
@@ -269,9 +271,16 @@ bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
 
         if (result == Dialogs::Result::Ok) {
         
+            yaraExecuted = false;
             RunYara();
         }
+
+    } else if (ID == Commands::SomeCommandViewRules.CommandId) {
+        yaraGetRulesFiles = false;
+        GetRulesFiles();
     }
+
+
 
     return false;
 }
@@ -632,7 +641,7 @@ void Instance::RunYara()
     }
 
     // Construim comanda EXACT ca cea hardcodata
-    std::string yaraCmd = "\"" + yaraExe.string() +
+    std::string cmdArgs = "/C \"\"" + yaraExe.string() +
                           "\" -g -m -s -r "
                           "\"" +
                           yaraRule.string() +
@@ -641,36 +650,33 @@ void Instance::RunYara()
                           currentFile.string() +
                           "\" "
                           "> \"" +
-                          outputFile.string() + "\"";
+                          outputFile.string() + "\"\"";
 
-    // cmd.exe arguments
-    std::string cmdArgs = "/C " + yaraCmd;
+    //HINSTANCE hInst = ShellExecuteA(nullptr, "open", "cmd.exe", cmdArgs.c_str(), nullptr, SW_HIDE);
 
-    // rulăm fără a bloca UI-ul
-    HINSTANCE hInst = ShellExecuteA(
-          nullptr,         // HWND
-          "open",          // verb
-          "cmd.exe",       // executable
-          cmdArgs.c_str(), // arguments
-          nullptr,         // working directory
-          SW_HIDE          // ascundem fereastra
-    );
 
-    if ((INT_PTR) hInst <= 32) {
-        yaraOutput.push_back("EROARE: Nu s-a putut porni YARA!");
+    SHELLEXECUTEINFOA shExecInfo{};
+    shExecInfo.cbSize       = sizeof(SHELLEXECUTEINFOA);
+    shExecInfo.fMask        = SEE_MASK_NOCLOSEPROCESS;
+    shExecInfo.hwnd         = nullptr;
+    shExecInfo.lpVerb       = "open";
+    shExecInfo.lpFile       = "cmd.exe";
+    shExecInfo.lpParameters = cmdArgs.c_str();
+    shExecInfo.lpDirectory  = nullptr;
+    shExecInfo.nShow        = SW_HIDE;
+    shExecInfo.hInstApp     = nullptr;
+
+    if (!ShellExecuteExA(&shExecInfo)) {
+        yaraOutput.push_back("EROARE: ShellExecuteEx a eșuat!");
         return;
     }
+
+    WaitForSingleObject(shExecInfo.hProcess, INFINITE);
+    CloseHandle(shExecInfo.hProcess);
 
 
     // Debug: cod de ieșire
     //yaraOutput.push_back("Cod Rezultat: " + std::to_string(result));
-
-    // Verificăm dacă s-a creat fișierul de output
-    //if (fs::exists(outputFile)) {
-    //    yaraOutput.push_back("Output file a fost creat cu succes.");
-    //} else {
-    //    yaraOutput.push_back("EROARE: Output file NU a fost creat!");
-    //}
 
 
     std::ifstream in(outputFile);
@@ -679,9 +685,6 @@ void Instance::RunYara()
         return;
     }
 
-    //std::string ruleName;
-    //std::string tags;
-    //std::string filePath;
 
     std::string metaStr; // va conține tot ce e între al doilea [ ]
     //std::string author, severity;
