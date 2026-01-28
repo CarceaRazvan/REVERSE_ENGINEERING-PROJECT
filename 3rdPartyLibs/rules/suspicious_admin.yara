@@ -1,7 +1,7 @@
 rule admin_tool {
 
     meta:
-        description = "A simple proof-of-concept to show YARA rules"
+        description = "Detects suspicious admin-like command execution"
         author = "Carcea Razvan"
 
     strings:
@@ -9,7 +9,7 @@ rule admin_tool {
         $cmd2 = "ipconfig"
         $cmd3 = "net user"
         $log  = "output.log"
-        
+
     condition:
         2 of ($cmd*) and $log
 

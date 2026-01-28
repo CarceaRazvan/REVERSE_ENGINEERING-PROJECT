@@ -122,7 +122,7 @@ namespace GView::View::YaraViewer
         void SelectAllRules();   
         void DeselectAllRules(); 
 
-        std::vector<std::string> ExtractHexContextFromYaraMatch(const std::string& yaraLine, const std::string& exePath, size_t contextSize = 16);
+        std::vector<std::string> ExtractHexContextFromYaraMatch(const std::string& yaraLine, const std::string& exePath, size_t contextSize = 64);
 
     };
 
