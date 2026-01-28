@@ -265,7 +265,8 @@ bool Instance::OnUpdateCommandBar(Application::CommandBar& commandBar)
     commandBar.SetCommand(Commands::SomeCommand.Key, Commands::SomeCommand.Caption, Commands::SomeCommand.CommandId);
     commandBar.SetCommand(Commands::SomeCommandViewRules.Key, Commands::SomeCommandViewRules.Caption, Commands::SomeCommandViewRules.CommandId);
     commandBar.SetCommand(Commands::EditRulesCommand.Key, Commands::EditRulesCommand.Caption, Commands::EditRulesCommand.CommandId);
-
+    commandBar.SetCommand(Commands::SelectAllCommand.Key, "SelectAll", Commands::SelectAllCommand.CommandId);
+    commandBar.SetCommand(Commands::DeselectAllCommand.Key, "DeselectAll", Commands::DeselectAllCommand.CommandId);
     return false;
 }
 
@@ -274,6 +275,8 @@ bool Instance::UpdateKeys(KeyboardControlsInterface* interfaceParam)
     interfaceParam->RegisterKey(&Commands::SomeCommand);
     interfaceParam->RegisterKey(&Commands::SomeCommandViewRules);
     interfaceParam->RegisterKey(&Commands::EditRulesCommand);
+    interfaceParam->RegisterKey(&Commands::SelectAllCommand);
+    interfaceParam->RegisterKey(&Commands::DeselectAllCommand);
 
     return true;
 }
@@ -322,8 +325,13 @@ bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
             yaraGetRulesFiles = false;
             GetRulesFiles();
         }
+    } else if (ID == Commands::SelectAllCommand.CommandId) {
+        SelectAllRules();
+        return true;
+    } else if (ID == Commands::DeselectAllCommand.CommandId) {
+        DeselectAllRules();
+        return true;
     }
-
 
 
 
@@ -572,6 +580,33 @@ void Instance::ToggleSelection()
     }
 }
 
+void Instance::SelectAllRules()
+{
+    bool changesMade = false;
+    for (auto& line : yaraLines) {
+        if (line.type == LineType::FileHeader) {
+            if (!line.isChecked) {
+                line.isChecked = true;
+                changesMade    = true;
+            }
+        }
+    }
+  
+}
+
+void Instance::DeselectAllRules()
+{
+    bool changesMade = false;
+    for (auto& line : yaraLines) {
+        if (line.type == LineType::FileHeader) {
+            if (line.isChecked) {
+                line.isChecked = false;
+                changesMade    = true;
+            }
+        }
+    }
+}
+
 
 void Instance::GetRulesFiles()
 {
@@ -600,7 +635,19 @@ void Instance::GetRulesFiles()
 
     // Header info
     yaraLines.push_back({ "=== YARA RULES SELECTION ===", LineType::Normal });
-    yaraLines.push_back({ "Select rules using SPACE or Mouse Click:", LineType::Normal });
+    yaraLines.push_back({ "", LineType::Normal });
+    yaraLines.push_back({ "Controls:", LineType::Match });
+    yaraLines.push_back({ "   [Space] or [Click] : Toggle selection", LineType::Normal });
+    yaraLines.push_back({ "   [Ctrl + A]         : Select All", LineType::Normal });
+    yaraLines.push_back({ "   [Ctrl + D]         : Deselect All", LineType::Normal });
+    yaraLines.push_back({ "   [F6] Run | [F7] View Rules | [F8] Edit", LineType::Normal });
+
+    // --- 2. DELIMITARE ---
+    yaraLines.push_back({ "_________________________________________", LineType::Normal });
+    yaraLines.push_back({ "", LineType::Normal });
+
+    // --- 3. TITLU LISTĂ ---
+    yaraLines.push_back({ "Rules list:", LineType::Info }); // Folosesc Info ca să fie galben (opțional) sau Normal
     yaraLines.push_back({ "", LineType::Normal });
 
     for (auto& entry : fs::directory_iterator(yaraRules)) {
