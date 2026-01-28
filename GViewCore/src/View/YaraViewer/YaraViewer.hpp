@@ -13,10 +13,13 @@ namespace GView::View::YaraViewer
         constexpr int DEMOVIEWER_SOME_CMD = 0x01;
         constexpr int DEMOVIEWER_SOME_CMD_VIEW_RULES = 0x02;
         constexpr int CMD_EDIT_RULES                 = 0x03;
+        constexpr int CMD_SELECT_ALL                 = 0x04;
+        constexpr int CMD_DESELECT_ALL               = 0x05;
         static KeyboardControl SomeCommand           = { Input::Key::F6, "Yara Run", "SomeCommand explanation", DEMOVIEWER_SOME_CMD };
         static KeyboardControl SomeCommandViewRules  = { Input::Key::F7, "View Rules", "View all the rules from folder rules", DEMOVIEWER_SOME_CMD_VIEW_RULES };
         static KeyboardControl EditRulesCommand      = { Input::Key::F8, "Edit Rules", "Open rules folder to manage files", CMD_EDIT_RULES };
-
+        static KeyboardControl SelectAllCommand      = { Input::Key::Ctrl | Input::Key::A, "Select All", "Select all available rules", CMD_SELECT_ALL };
+        static KeyboardControl DeselectAllCommand    = { Input::Key::Ctrl | Input::Key::D, "Deselect All", "Deselect all rules", CMD_DESELECT_ALL };
     }
 
     struct SettingsData
@@ -53,6 +56,10 @@ namespace GView::View::YaraViewer
         LineType type;
         bool isChecked;                 // True dacă regula e selectată
         std::filesystem::path filePath; // Calea către fișierul .yara
+        bool isExpanded;                // Only used if type == Match
+        int indentLevel;                // Visual indentation
+        int parentIndex;                // Index of the parent line (-1 if root)
+        bool isVisible;				  // Used for collapsible sections
     };
 
     class Instance : public View::ViewControl
@@ -112,6 +119,8 @@ namespace GView::View::YaraViewer
         void GetRulesFiles();
 
         void ToggleSelection();
+        void SelectAllRules();   
+        void DeselectAllRules(); 
 
         std::vector<std::string> ExtractHexContextFromYaraMatch(const std::string& yaraLine, const std::string& exePath, size_t contextSize = 16);
 
