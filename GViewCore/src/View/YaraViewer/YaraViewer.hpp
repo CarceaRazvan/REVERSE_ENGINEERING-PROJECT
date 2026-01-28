@@ -12,8 +12,10 @@ namespace GView::View::YaraViewer
     {
         constexpr int DEMOVIEWER_SOME_CMD = 0x01;
         constexpr int DEMOVIEWER_SOME_CMD_VIEW_RULES = 0x02;
-        static KeyboardControl SomeCommand = { Input::Key::F6, "Yara Run", "SomeCommand explanation", DEMOVIEWER_SOME_CMD };
+        constexpr int CMD_EDIT_RULES                 = 0x03;
+        static KeyboardControl SomeCommand           = { Input::Key::F6, "Yara Run", "SomeCommand explanation", DEMOVIEWER_SOME_CMD };
         static KeyboardControl SomeCommandViewRules  = { Input::Key::F7, "View Rules", "View all the rules from folder rules", DEMOVIEWER_SOME_CMD_VIEW_RULES };
+        static KeyboardControl EditRulesCommand      = { Input::Key::F8, "Edit Rules", "Open rules folder to manage files", CMD_EDIT_RULES };
 
     }
 
@@ -37,6 +39,22 @@ namespace GView::View::YaraViewer
         uint32 maxCharactersPerLine;
     };
        
+    enum class LineType {
+        Normal,
+        FileHeader,  // Aici vom avea checkbox [ ] / [x]
+        RuleContent, // Pentru fundal colorat
+        Info,
+        Match
+    };
+
+    // Structura care ține datele
+    struct LineInfo {
+        std::string text;
+        LineType type;
+        bool isChecked;                 // True dacă regula e selectată
+        std::filesystem::path filePath; // Calea către fișierul .yara
+    };
+
     class Instance : public View::ViewControl
     {
      
@@ -47,7 +65,8 @@ namespace GView::View::YaraViewer
 
         bool yaraExecuted = false;  
         bool yaraGetRulesFiles = false;
-        std::vector<std::string> yaraOutput;  
+        //std::vector<std::string> yaraOutput;  
+        std::vector<LineInfo> yaraLines;
 
 
 
@@ -87,9 +106,14 @@ namespace GView::View::YaraViewer
         bool OnMouseDrag(int x, int y, Input::MouseButton button, Input::Key keyCode) override;
         void OnMousePressed(int x, int y, Input::MouseButton button, Input::Key keyCode) override;
         void CopySelectionToClipboard();
+        void ComputeMouseCoords(int x, int y, uint32 startViewLine, uint32 leftViewCol, const std::vector<LineInfo>& lines, uint32& outRow, uint32& outCol);
 
         void RunYara();  
         void GetRulesFiles();
+
+        void ToggleSelection();
+
+        std::vector<std::string> ExtractHexContextFromYaraMatch(const std::string& yaraLine, const std::string& exePath, size_t contextSize = 16);
 
     };
 

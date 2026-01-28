@@ -132,14 +132,17 @@ bool Instance::AddCategoryBeforePropertyNameWhenSerializing() const
 
 void Instance::Paint(Graphics::Renderer& renderer)
 {
-    ColorPair textNormal  = ColorPair{ Color::White, Color::Transparent };
-    ColorPair textCursor  = ColorPair{ Color::Black, Color::White };
-    ColorPair arrowColor  = ColorPair{ Color::Gray, Color::Transparent };
-    ColorPair marginColor = ColorPair{ Color::Gray, Color::Transparent };
+    ColorPair textNormal    = ColorPair{ Color::White, Color::Transparent };
+    ColorPair textCursor    = ColorPair{ Color::Black, Color::White };
+    ColorPair arrowColor    = ColorPair{ Color::Gray, Color::Transparent };
+    ColorPair marginColor   = ColorPair{ Color::Gray, Color::Transparent };
     ColorPair textSelection = ColorPair{ Color::Black, Color::Silver };
 
     ColorPair ruleBlockColor = ColorPair{ Color::Green, Color::Transparent };
-
+    ColorPair checkboxColor  = ColorPair{ Color::Red, Color::Transparent };    // pt [x]
+    ColorPair headerColor    = ColorPair{ Color::Yellow, Color::Transparent }; // pt nume fisier
+    ColorPair infoColor      = ColorPair{ Color::Red, Color::Transparent };
+    ColorPair matchColor     = ColorPair{ Color::Yellow, Color::Transparent };
 
     uint32 rows           = this->GetHeight();
     uint32 width          = this->GetWidth();
@@ -160,29 +163,29 @@ void Instance::Paint(Graphics::Renderer& renderer)
         }
     }
 
-
     // Iterăm prin rândurile de pe ecran
     for (uint32 tr = 0; tr < rows; tr++) {
-        // Calculăm ce linie din vector trebuie afișată
         uint32 lineIndex = this->startViewLine + tr;
-
-        // Dacă am depășit numărul de linii din vector, ne oprim
-        if (lineIndex >= yaraOutput.size())
+        if (lineIndex >= yaraLines.size())
             break;
 
-        // Referință la linia curentă
-        const std::string& currentLineStr = yaraOutput[lineIndex];
+        // Luăm informația despre linie din vectorul structurat
+        const LineInfo& info    = yaraLines[lineIndex];
+        std::string displayText = info.text;
 
-        // 1. Desenăm Săgeata și Marginea
+        // Dacă e Header, punem prefixul [x] sau [ ]
+        if (info.type == LineType::FileHeader) {
+            std::string prefix = info.isChecked ? "[x] " : "[ ] ";
+            displayText        = prefix + displayText;
+        }
+
         renderer.WriteSpecialCharacter(LEFT_MARGIN - 1, tr, SpecialChars::BoxVerticalSingleLine, marginColor);
         if (lineIndex == this->cursorRow) {
             renderer.WriteSingleLineText(1, tr, "->", arrowColor);
         }
 
-        bool isRuleContent = (currentLineStr.rfind("    ", 0) == 0);
-
-        if (currentLineStr.length() > this->leftViewCol) {
-            std::string_view view = currentLineStr;
+        if (displayText.length() > this->leftViewCol) {
+            std::string_view view = displayText;
             view                  = view.substr(this->leftViewCol);
 
             for (uint32 i = 0; i < view.length(); i++) {
@@ -192,12 +195,22 @@ void Instance::Paint(Graphics::Renderer& renderer)
                 uint32 absCol          = this->leftViewCol + i;
                 ColorPair currentColor = textNormal;
 
-                // A. Aplicăm culoarea de fundal dacă e conținut de regulă
-                if (isRuleContent) {
+                // A. Culori specifice tipului de linie
+                if (info.type == LineType::RuleContent) {
                     currentColor = ruleBlockColor;
+                } else if (info.type == LineType::FileHeader) {
+                    // Colorăm checkbox-ul cu roșu, numele cu galben
+                    if (absCol < 4)
+                        currentColor = checkboxColor;
+                    else
+                        currentColor = headerColor;
+                } else if (info.type == LineType::Info) {
+                    currentColor = infoColor;
+                } else if (info.type == LineType::Match) {
+                    currentColor = matchColor;
                 }
 
-                // B. Logică selecție (Suprascrie fundalul regulii)
+                // B. Selecție
                 if (this->selectionActive) {
                     bool isSelected = false;
                     if (lineIndex > selStartRow && lineIndex < selEndRow)
@@ -212,12 +225,11 @@ void Instance::Paint(Graphics::Renderer& renderer)
                         if (absCol < selEndCol)
                             isSelected = true;
                     }
-
                     if (isSelected)
                         currentColor = textSelection;
                 }
 
-                // C. Cursor (Prioritate maximă)
+                // C. Cursor
                 bool isCursor = (lineIndex == this->cursorRow && absCol == this->cursorCol);
                 if (isCursor)
                     currentColor = textCursor;
@@ -225,43 +237,18 @@ void Instance::Paint(Graphics::Renderer& renderer)
                 renderer.WriteCharacter(LEFT_MARGIN + i, tr, view[i], currentColor);
             }
 
-            // D. Umplem restul liniei cu culoarea de fundal a regulii (pentru aspect de bloc compact)
-            if (isRuleContent) {
-                int textLenOnScreen = (int) view.length();
-                int startFill       = LEFT_MARGIN + textLenOnScreen;
-                // Dacă textul s-a terminat dar mai e loc pe ecran și nu e selectat cursorul acolo
-                if (startFill < (int) width) {
-                    // Putem desena spații goale cu fundalul regulii
-                    // Atenție: Dacă cursorul e la final, el va fi desenat mai jos, deci nu suprascriem poziția lui
-                    for (int k = startFill; k < (int) width; k++) {
-                        // Verificăm dacă cursorul e chiar aici (pe spațiul gol de după text)
-                        bool isCursorHere = (lineIndex == this->cursorRow && (this->leftViewCol + (k - LEFT_MARGIN)) == this->cursorCol);
-                        renderer.WriteCharacter(k, tr, ' ', isCursorHere ? textCursor : ruleBlockColor);
-                    }
-                }
-            }
-        } else {
-            // Linia e goală sau scrollată complet la stânga
-            // Dacă e linie goală dar face parte din bloc (puțin probabil la empty string, dar pentru consistență)
-            // În cazul nostru, liniile goale dintre reguli nu au 4 spații, deci rămân negre/transparente.
-        }
-
-        // Desenăm cursorul standard la final de text (dacă nu a fost desenat de bucla de umplere de mai sus)
-        // Logica de sus cu "Umplem restul liniei" ar trebui să acopere și cursorul, dar păstrăm protecția:
-        if (!isRuleContent && lineIndex == this->cursorRow && this->cursorCol == currentLineStr.length()) {
-            if (this->cursorCol >= this->leftViewCol) {
-                int screenX = (int) (this->cursorCol - this->leftViewCol) + LEFT_MARGIN;
-                if (screenX < (int) width) {
-                    renderer.WriteCharacter(screenX, tr, ' ', textCursor);
+            // D. Umplere fundal pentru blocuri
+            if (info.type == LineType::RuleContent) {
+                int startFill = LEFT_MARGIN + (int) view.length();
+                for (int k = startFill; k < (int) width; k++) {
+                    bool isCursorHere = (lineIndex == this->cursorRow && (this->leftViewCol + (k - LEFT_MARGIN)) == this->cursorCol);
+                    renderer.WriteCharacter(k, tr, ' ', isCursorHere ? textCursor : ruleBlockColor);
                 }
             }
         }
 
-
-        // 3. Desenăm cursorul dacă e la finalul liniei sau pe o linie goală
-        // (Când cursorCol este egal cu lungimea liniei)
-        if (lineIndex == this->cursorRow && this->cursorCol == currentLineStr.length()) {
-            // Verificăm dacă poziția cursorului este vizibilă pe ecran
+        // Desenare cursor la final de linie
+        if (lineIndex == this->cursorRow && this->cursorCol == displayText.length()) {
             if (this->cursorCol >= this->leftViewCol) {
                 int screenX = (int) (this->cursorCol - this->leftViewCol) + LEFT_MARGIN;
                 if (screenX < (int) width) {
@@ -277,6 +264,8 @@ bool Instance::OnUpdateCommandBar(Application::CommandBar& commandBar)
 {
     commandBar.SetCommand(Commands::SomeCommand.Key, Commands::SomeCommand.Caption, Commands::SomeCommand.CommandId);
     commandBar.SetCommand(Commands::SomeCommandViewRules.Key, Commands::SomeCommandViewRules.Caption, Commands::SomeCommandViewRules.CommandId);
+    commandBar.SetCommand(Commands::EditRulesCommand.Key, Commands::EditRulesCommand.Caption, Commands::EditRulesCommand.CommandId);
+
     return false;
 }
 
@@ -284,6 +273,8 @@ bool Instance::UpdateKeys(KeyboardControlsInterface* interfaceParam)
 {
     interfaceParam->RegisterKey(&Commands::SomeCommand);
     interfaceParam->RegisterKey(&Commands::SomeCommandViewRules);
+    interfaceParam->RegisterKey(&Commands::EditRulesCommand);
+
     return true;
 }
 
@@ -305,7 +296,34 @@ bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
     } else if (ID == Commands::SomeCommandViewRules.CommandId) {
         yaraGetRulesFiles = false;
         GetRulesFiles();
+
+    } else if (ID == Commands::EditRulesCommand.CommandId) {
+
+        yaraGetRulesFiles = false;
+        GetRulesFiles();
+
+        fs::path currentPath = fs::current_path();
+        fs::path rootPath    = currentPath.parent_path().parent_path();
+        fs::path yaraRules   = rootPath / "3rdPartyLibs" / "rules";
+
+        if (!fs::exists(yaraRules)) {
+            fs::create_directories(yaraRules);
+        }
+
+        // 1. Deschidem folderul
+        ShellExecuteA(NULL, "explore", yaraRules.string().c_str(), NULL, NULL, SW_SHOWNORMAL);
+
+        // 2. Afișăm un mesaj actualizat
+        auto result = AppCUI::Dialogs::MessageBox::ShowOkCancel(
+              "Edit Rules", "Rules folder opened.\n\nYou can Add, Edit or Delete .yara files now.\n\nClick [OK] when you are done to refresh the list.");
+
+        // 3. Refresh automat la OK
+        if (result == Dialogs::Result::Ok) {
+            yaraGetRulesFiles = false;
+            GetRulesFiles();
+        }
     }
+
 
 
 
@@ -322,19 +340,22 @@ void Instance::OnAfterResize(int newWidth, int newHeight)
 
 bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
 {
-
     if (keyCode == (Key::Ctrl | Key::C)) {
         CopySelectionToClipboard();
         return true;
     }
 
+    // Tasta SPACE pentru a bifa/debifa reguli
+    if (keyCode == Key::Space) {
+        ToggleSelection();
+        return true;
+    }
+
     switch (keyCode) {
     case Key::Right:
-        // Putem merge până la lungimea liniei (pentru a putea adăuga text teoretic)
-        if (cursorCol < yaraOutput[cursorRow].length()) {
+        if (cursorCol < yaraLines[cursorRow].text.length()) { // Atenție: text.length() nu length() direct
             cursorCol++;
-        } else if (cursorRow + 1 < yaraOutput.size()) {
-            // Dacă dăm dreapta la final de linie, mergem la începutul următoarei
+        } else if (cursorRow + 1 < yaraLines.size()) {
             cursorRow++;
             cursorCol = 0;
         }
@@ -342,22 +363,20 @@ bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
         return true;
 
     case Key::Left:
-        if (cursorCol > 0) {
+        if (cursorCol > 0)
             cursorCol--;
-        } else if (cursorRow > 0) {
-            // Dacă dăm stânga la început de linie, mergem la finalul anterioarei
+        else if (cursorRow > 0) {
             cursorRow--;
-            cursorCol = (uint32) yaraOutput[cursorRow].length();
+            cursorCol = (uint32) yaraLines[cursorRow].text.length();
         }
         MoveTo();
         return true;
 
     case Key::Down:
-        if (cursorRow + 1 < yaraOutput.size()) {
+        if (cursorRow + 1 < yaraLines.size()) {
             cursorRow++;
-            // Dacă linia nouă e mai scurtă, mutăm cursorul la finalul ei
-            if (cursorCol > yaraOutput[cursorRow].length())
-                cursorCol = (uint32) yaraOutput[cursorRow].length();
+            if (cursorCol > yaraLines[cursorRow].text.length())
+                cursorCol = (uint32) yaraLines[cursorRow].text.length();
         }
         MoveTo();
         return true;
@@ -365,22 +384,12 @@ bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
     case Key::Up:
         if (cursorRow > 0) {
             cursorRow--;
-            // Dacă linia nouă e mai scurtă, mutăm cursorul la finalul ei
-            if (cursorCol > yaraOutput[cursorRow].length())
-                cursorCol = (uint32) yaraOutput[cursorRow].length();
+            if (cursorCol > yaraLines[cursorRow].text.length())
+                cursorCol = (uint32) yaraLines[cursorRow].text.length();
         }
         MoveTo();
         return true;
-
-    case Key::Home:
-        cursorCol = 0;
-        MoveTo();
-        return true;
-
-    case Key::End:
-        cursorCol = (uint32) yaraOutput[cursorRow].length();
-        MoveTo();
-        return true;
+        // Home/End la fel, folosind yaraLines[cursorRow].text.length()
     }
     return false;
 }
@@ -432,85 +441,63 @@ bool Instance::OnMouseWheel(int x, int y, AppCUI::Input::MouseWheel direction, A
     return false;
 }
 
-static void ComputeMouseCoords(int x, int y, uint32 startViewLine, uint32 leftViewCol, const std::vector<std::string>& lines, uint32& outRow, uint32& outCol)
+void Instance::ComputeMouseCoords(int x, int y, uint32 startViewLine, uint32 leftViewCol, const std::vector<LineInfo>& lines, uint32& outRow, uint32& outCol)
 {
-    const int LEFT_MARGIN = 4; // Trebuie să fie identic cu cel din Paint()
-
-    // 1. Calculăm rândul
-    // Adunăm offset-ul de scroll vertical (startViewLine) la poziția Y a mouse-ului
-    uint32 r = startViewLine + y;
-
-    // Verificăm limitele verticale
-    if (lines.empty()) {
+    const int LEFT_MARGIN = 4;
+    uint32 r              = startViewLine + y;
+    if (lines.empty())
         r = 0;
-    } else if (r >= lines.size()) {
+    else if (r >= lines.size())
         r = (uint32) lines.size() - 1;
-    }
     outRow = r;
 
-    // 2. Calculăm coloana
-    // Scădem marginea din stânga și adunăm scroll-ul orizontal
     int val = (int) leftViewCol + (x - LEFT_MARGIN);
     if (val < 0)
-        val = 0; // Dacă dăm click pe margine (linia verticală)
+        val = 0;
     uint32 c = (uint32) val;
 
-    // Verificăm limitele orizontale (să nu punem cursorul după sfârșitul liniei)
     if (outRow < lines.size()) {
-        if (c > lines[outRow].length()) {
-            c = (uint32) lines[outRow].length();
-        }
-    } else {
+        if (c > lines[outRow].text.length())
+            c = (uint32) lines[outRow].text.length();
+    } else
         c = 0;
-    }
     outCol = c;
 }
 
 void Instance::OnMousePressed(int x, int y, AppCUI::Input::MouseButton button, AppCUI::Input::Key keyCode)
 {
-    // Ne interesează doar Click Stânga
     if ((button & MouseButton::Left) == MouseButton::None)
         return;
-
-    if (this->yaraOutput.empty())
+    if (yaraLines.empty())
         return;
 
-    // 1. Calculăm unde am dat click
-    ComputeMouseCoords(x, y, this->startViewLine, this->leftViewCol, this->yaraOutput, this->cursorRow, this->cursorCol);
+    ComputeMouseCoords(x, y, this->startViewLine, this->leftViewCol, this->yaraLines, this->cursorRow, this->cursorCol);
 
-    // 2. Setăm ANCORA și resetăm selecția
-    // Când apeși click, selecția veche dispare, și începe una nouă de la punctul curent
+    // Toggle dacă e click pe header
+    if (this->cursorRow < yaraLines.size() && yaraLines[this->cursorRow].type == LineType::FileHeader) {
+        ToggleSelection();
+    }
+
     this->selectionAnchorRow = this->cursorRow;
     this->selectionAnchorCol = this->cursorCol;
     this->selectionActive    = false;
-
-    // 3. Facem update la view (MoveTo va asigura că cursorul e vizibil)
     MoveTo();
 }
 
 bool Instance::OnMouseDrag(int x, int y, AppCUI::Input::MouseButton button, AppCUI::Input::Key keyCode)
 {
-    // Ne interesează doar Drag cu Stânga
     if ((button & MouseButton::Left) == MouseButton::None)
         return false;
-
-    if (this->yaraOutput.empty())
+    if (yaraLines.empty())
         return false;
 
-    // 1. Mutăm CURSORUL la noua poziție a mouse-ului
-    ComputeMouseCoords(x, y, this->startViewLine, this->leftViewCol, this->yaraOutput, this->cursorRow, this->cursorCol);
+    ComputeMouseCoords(x, y, this->startViewLine, this->leftViewCol, this->yaraLines, this->cursorRow, this->cursorCol);
 
-    // 2. Activăm selecția
-    // Dacă cursorul s-a mișcat față de ancoră, înseamnă că avem text selectat
     if (this->cursorRow != this->selectionAnchorRow || this->cursorCol != this->selectionAnchorCol) {
         this->selectionActive = true;
     }
-
-    // 3. Scroll automat
-    // MoveTo va face scroll automat dacă tragi mouse-ul în afara ferestrei
     MoveTo();
-
-    return true; // Returnăm true ca să spunem că am procesat evenimentul
+    return true;
 }
 
 void Instance::CopySelectionToClipboard()
@@ -520,7 +507,10 @@ void Instance::CopySelectionToClipboard()
 
     // 1. ZONA CRITICĂ (Citim datele protejat)
     {
-        if (!this->selectionActive || this->yaraOutput.empty())
+        // Dacă ai definit mutex-ul în header, decomentează linia de mai jos:
+        // std::lock_guard<std::mutex> lock(this->linesMutex);
+
+        if (!this->selectionActive || this->yaraLines.empty())
             return;
 
         // a) Ordonăm coordonatele (Start trebuie să fie înainte de End)
@@ -537,10 +527,13 @@ void Instance::CopySelectionToClipboard()
 
         // b) Iterăm prin liniile selectate
         for (uint32 r = r1; r <= r2; r++) {
-            if (r >= this->yaraOutput.size())
+            if (r >= this->yaraLines.size())
                 break;
 
-            const std::string& line = this->yaraOutput[r];
+            // --- MODIFICAREA PRINCIPALĂ ESTE AICI ---
+            // Accesăm câmpul .text din structura LineInfo
+            const std::string& line = this->yaraLines[r].text;
+            // ----------------------------------------
 
             // Calculăm indecșii de tăiere pentru linia curentă
             uint32 start = (r == r1) ? c1 : 0;
@@ -562,263 +555,378 @@ void Instance::CopySelectionToClipboard()
             }
         }
     }
-    // AICI se termină lock-ul. Mutex-ul este eliberat.
+    // AICI se termină lock-ul.
 
-    // 2. TRIMITEM LA CLIPBOARD (OS Call - facem asta fără mutex)
+    // 2. TRIMITEM LA CLIPBOARD
     if (!textToCopy.empty()) {
         AppCUI::OS::Clipboard::SetText(textToCopy);
     }
 }
+
+void Instance::ToggleSelection()
+{
+    if (this->cursorRow < yaraLines.size()) {
+        if (yaraLines[this->cursorRow].type == LineType::FileHeader) {
+            yaraLines[this->cursorRow].isChecked = !yaraLines[this->cursorRow].isChecked;
+        }
+    }
+}
+
 
 void Instance::GetRulesFiles()
 {
     if (yaraGetRulesFiles)
         return;
 
+    // ---------------------------------------------------------
+    // RESETARE INTERFATA
+    // ---------------------------------------------------------
+    this->cursorRow          = 0;
+    this->cursorCol          = 0;
+    this->startViewLine      = 0;
+    this->leftViewCol        = 0;
+    this->selectionActive    = false;
+    this->selectionAnchorRow = 0;
+    this->selectionAnchorCol = 0;
+
+    yaraLines.clear();
+
     fs::path currentPath = fs::current_path();
     fs::path rootPath    = currentPath.parent_path().parent_path();
     fs::path yaraRules   = rootPath / "3rdPartyLibs" / "rules";
 
-    if (!fs::exists(yaraRules) || !fs::is_directory(yaraRules)) {
-        // ... (gestionare eroare rămâne la fel)
+    if (!fs::exists(yaraRules) || !fs::is_directory(yaraRules))
         return;
-    }
 
-    yaraOutput = {
-        "=== YARA RULES ===",
-        "",
-        "Rules path: ",
-        "    " + yaraRules.string(),
-        "",
-        "Rules files : ",
-        "" // Spațiu
-    };
+    // Header info
+    yaraLines.push_back({ "=== YARA RULES SELECTION ===", LineType::Normal });
+    yaraLines.push_back({ "Select rules using SPACE or Mouse Click:", LineType::Normal });
+    yaraLines.push_back({ "", LineType::Normal });
 
     for (auto& entry : fs::directory_iterator(yaraRules)) {
         if (entry.is_regular_file()) {
             std::string filename = entry.path().filename().string();
 
-            // Adăugăm numele fișierului (ca titlu)
-            yaraOutput.push_back("FILE: " + filename);
+            // Adăugăm HEADER-ul fișierului (care va avea checkbox)
+            LineInfo header;
+            header.text      = filename;
+            header.type      = LineType::FileHeader;
+            header.isChecked = false; // Implicit nebifat
+            header.filePath  = entry.path();
+            yaraLines.push_back(header);
 
-            // Marker invizibil sau explicit pentru început bloc
-            // (Putem folosi un prefix special, dar aici ne bazăm pe indentare în Paint)
-
+            // Citim conținutul
             std::ifstream in(entry.path());
-            if (!in.is_open()) {
-                yaraOutput.push_back("    [Eroare la citire]");
-                continue;
+            if (in.is_open()) {
+                std::string line;
+                while (std::getline(in, line)) {
+                    while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+                        line.pop_back();
+                    // Conținut regulă (indentat)
+                    yaraLines.push_back({ "    " + line, LineType::RuleContent });
+                }
             }
-
-            std::string line;
-            while (std::getline(in, line)) {
-                while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
-                    line.pop_back();
-
-                // Adăugăm linia simplă, doar cu indentare pentru a arăta că e cod
-                yaraOutput.push_back("    " + line);
-            }
-            // Adăugăm o linie goală după fiecare fișier pentru spațiere vizuală
-            yaraOutput.push_back("");
+            yaraLines.push_back({ "", LineType::Normal });
         }
     }
-
     yaraGetRulesFiles = true;
 }
 
 void Instance::RunYara()
 {
-    if (yaraExecuted)
-        return; // deja executat
+    // ---------------------------------------------------------
+    // 1. SELECTIE REGULI
+    // ---------------------------------------------------------
+    std::vector<fs::path> selectedRules;
+    for (const auto& line : yaraLines) {
+        if (line.type == LineType::FileHeader && line.isChecked) {
+            selectedRules.push_back(line.filePath);
+        }
+    }
 
+    if (selectedRules.empty()) {
+        AppCUI::Dialogs::MessageBox::ShowError("Error", "No rules selected!");
+        return;
+    }
+
+    // ---------------------------------------------------------
+    // 2. SETUP PATH-URI
+    // ---------------------------------------------------------
+    fs::path currentPath = fs::current_path();
+    fs::path rootPath    = currentPath.parent_path().parent_path();
+    fs::path yaraExe     = rootPath / "3rdPartyLibs" / "yara-win64" / "yara64.exe";
+    fs::path outputFile  = rootPath / "3rdPartyLibs" / "output" / "output.txt";
+    fs::path currentFile = this->obj->GetPath();
+
+    fs::path outputDir = outputFile.parent_path();
+    if (!fs::exists(outputDir))
+        fs::create_directories(outputDir);
+
+    if (!fs::exists(yaraExe)) {
+        AppCUI::Dialogs::MessageBox::ShowError("Error", "Yara exe not found!");
+        return;
+    }
+
+    // ---------------------------------------------------------
+    // 3. RESETARE INTERFATA
+    // ---------------------------------------------------------
     this->cursorRow     = 0;
     this->cursorCol     = 0;
     this->startViewLine = 0;
     this->leftViewCol   = 0;
+    this->selectionActive    = false;
+    this->selectionAnchorRow = 0;
+    this->selectionAnchorCol = 0;
 
-    // Căi calculate dinamic
-    fs::path currentPath = fs::current_path();
-    fs::path currentFile = this->obj->GetPath();
-    fs::path rootPath    = currentPath.parent_path().parent_path();
-    fs::path yaraExe    = rootPath / "3rdPartyLibs" / "yara-win64" / "yara64.exe";
-    fs::path yaraRule   = rootPath / "3rdPartyLibs" / "rules" / "helloworld.yara";
-    fs::path outputFile = rootPath / "3rdPartyLibs" / "output" / "output.txt";
+    yaraLines.clear();
 
-    // Debug: afișăm toate căile
-    yaraOutput = { "=== YARA SCAN ===",
-                   "",
-                   "Target: " + currentFile.string(),      
-                   //"YARA exe: " + yaraExe.string(),
-                   "YARA rule: " + yaraRule.string(),
-                   //"Output file: " + outputFile.string() 
-                   ""
-                   };
+    // Header temporar (va fi completat la final cu Summary)
+    yaraLines.push_back({ "=== SCANNING RESULTS ===", LineType::Normal });
+    yaraLines.push_back({ "", LineType::Normal });
+    yaraLines.push_back({ "scanning...", LineType::Normal }); // Placeholder pt Summary
 
-    // Verificări existență fișiere
-    if (!fs::exists(yaraExe)) {
-        yaraOutput.push_back("EROARE: YARA exe NU a fost gasit!");
-        return;
-    }
+    int globalMatchCount = 0;
 
-    if (!fs::exists(yaraRule)) {
-        yaraOutput.push_back("EROARE: YARA rule NU a fost gasit!");
-        return;
-    }
+    // ---------------------------------------------------------
+    // 4. EXECUTIE PER REGULA
+    // ---------------------------------------------------------
+    for (const auto& rulePath : selectedRules) {
+        std::string ruleName = rulePath.filename().string();
 
-    // Construim comanda EXACT ca cea hardcodata
-    std::string cmdArgs = "/C \"\"" + yaraExe.string() +
-                          "\" -g -m -s -r "
-                          "\"" +
-                          yaraRule.string() +
-                          "\" "
-                          "\"" +
-                          currentFile.string() +
-                          "\" "
-                          "> \"" +
-                          outputFile.string() + "\"\"";
+        // Separator vizual între reguli
+        yaraLines.push_back({ "-------------------------------------------------------------", LineType::Normal });
+        yaraLines.push_back({ "Scanning with rule: " + ruleName, LineType::Info }); // Folosim FileHeader ca să apară colorat (chiar dacă nu e checkbox)
 
-    //HINSTANCE hInst = ShellExecuteA(nullptr, "open", "cmd.exe", cmdArgs.c_str(), nullptr, SW_HIDE);
+        // Comanda YARA
+        std::string cmdArgs = "/C \"\"" + yaraExe.string() +
+                              "\" -g -m -s -r "
+                              "\"" +
+                              rulePath.string() +
+                              "\" "
+                              "\"" +
+                              currentFile.string() +
+                              "\" "
+                              "> \"" +
+                              outputFile.string() + "\"\"";
 
+        SHELLEXECUTEINFOA shExecInfo{};
+        shExecInfo.cbSize       = sizeof(SHELLEXECUTEINFOA);
+        shExecInfo.fMask        = SEE_MASK_NOCLOSEPROCESS;
+        shExecInfo.hwnd         = nullptr;
+        shExecInfo.lpVerb       = "open";
+        shExecInfo.lpFile       = "cmd.exe";
+        shExecInfo.lpParameters = cmdArgs.c_str();
+        shExecInfo.nShow        = SW_HIDE;
 
-    SHELLEXECUTEINFOA shExecInfo{};
-    shExecInfo.cbSize       = sizeof(SHELLEXECUTEINFOA);
-    shExecInfo.fMask        = SEE_MASK_NOCLOSEPROCESS;
-    shExecInfo.hwnd         = nullptr;
-    shExecInfo.lpVerb       = "open";
-    shExecInfo.lpFile       = "cmd.exe";
-    shExecInfo.lpParameters = cmdArgs.c_str();
-    shExecInfo.lpDirectory  = nullptr;
-    shExecInfo.nShow        = SW_HIDE;
-    shExecInfo.hInstApp     = nullptr;
+        if (ShellExecuteExA(&shExecInfo)) {
+            WaitForSingleObject(shExecInfo.hProcess, INFINITE);
+            CloseHandle(shExecInfo.hProcess);
 
-    if (!ShellExecuteExA(&shExecInfo)) {
-        yaraOutput.push_back("EROARE: ShellExecuteEx a eșuat!");
-        return;
-    }
+            // ---------------------------------------------------------
+            // 5. PARSARE REZULTATE (Logica ta veche)
+            // ---------------------------------------------------------
+            std::ifstream in(outputFile);
+            if (!in.is_open()) {
+                yaraLines.push_back({ "    [ERROR] Cannot open output file.", LineType::Normal });
+                continue;
+            }
 
-    WaitForSingleObject(shExecInfo.hProcess, INFINITE);
-    CloseHandle(shExecInfo.hProcess);
+            std::string line;
+            std::vector<std::string> matchedStrings;
+            std::string currentRule, currentTags, currentAuthor, currentSeverity;
 
+            bool foundAnyInFile = false;
 
-    // Debug: cod de ieșire
-    //yaraOutput.push_back("Cod Rezultat: " + std::to_string(result));
+            while (std::getline(in, line)) {
+                while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+                    line.pop_back();
+                if (line.empty())
+                    continue;
 
+                foundAnyInFile = true;
 
-    std::ifstream in(outputFile);
-    if (!in.is_open()) {
-        yaraOutput.push_back("Eroare la citirea fișierului: " + outputFile.string());
-        return;
-    }
+                // Detectăm linia header YARA: "rule_name [tags] [meta] path"
+                if (line.find(currentFile.string()) != std::string::npos && line.find('[') != std::string::npos && line.find(']') != std::string::npos) {
+                    // === DUMP REGULA PRECEDENTĂ (Dacă există) ===
+                    if (!currentRule.empty()) {
+                        globalMatchCount++;
+                        yaraLines.push_back({ "    [MATCH] Rule: " + currentRule, LineType::Match });
+                        if (!currentTags.empty())
+                        yaraLines.push_back({ "    Tags: " + currentTags, LineType::Normal });
+                        if (!currentAuthor.empty())
+                            yaraLines.push_back({ "    Author: " + currentAuthor, LineType::Normal });
+                        if (!currentSeverity.empty())
+                            yaraLines.push_back({ "    Severity: " + currentSeverity, LineType::Normal });
 
+                        // Strings & Hex Context
+                        for (auto& s : matchedStrings) {
+                            yaraLines.push_back({ "        " + s, LineType::RuleContent }); // Fundal verde
+                            yaraLines.push_back({ "        At:", LineType::Normal });
 
-    std::string metaStr; // va conține tot ce e între al doilea [ ]
-    //std::string author, severity;
+                            // Apelează funcția ta de extragere
+                            auto ctx = ExtractHexContextFromYaraMatch(s, currentFile.string());
+                            for (auto& ctxLine : ctx)
+                                yaraLines.push_back({ "                " + ctxLine, LineType::Normal });
+                        }
+                        yaraLines.push_back({ "", LineType::Normal });
+                    }
 
-    int matchCount     = 0;
-    bool foundAnything = false;
+                    // === RESETARE PENTRU REGULA NOUĂ ===
+                    matchedStrings.clear();
+                    currentAuthor.clear();
+                    currentSeverity.clear();
+                    currentTags.clear();
 
-    std::string line;
-    std::vector<std::string> matchedStrings;
+                    // === PARSARE HEADER NOU ===
+                    // 1. Rule Name
+                    size_t spacePos = line.find(' ');
+                    currentRule     = line.substr(0, spacePos);
 
-    std::string currentRule, currentTags, currentAuthor, currentSeverity;
+                    // 2. Tags
+                    size_t firstBracketStart = line.find('[');
+                    size_t firstBracketEnd   = line.find(']');
+                    if (firstBracketStart != std::string::npos && firstBracketEnd != std::string::npos)
+                        currentTags = line.substr(firstBracketStart + 1, firstBracketEnd - firstBracketStart - 1);
 
-    while (std::getline(in, line)) {
-        // eliminăm CR/LF
-        while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
-            line.pop_back();
+                    // 3. Meta (Author, Severity)
+                    size_t metaStart = line.find('[', firstBracketEnd + 1);
+                    size_t metaEnd   = line.find(']', metaStart);
+                    if (metaStart != std::string::npos && metaEnd != std::string::npos) {
+                        std::string metaStr = line.substr(metaStart + 1, metaEnd - metaStart - 1);
 
-        if (line.empty())
-            continue;
+                        auto extractMeta = [&](const std::string& key) -> std::string {
+                            size_t keyPos = metaStr.find(key + "=\"");
+                            if (keyPos != std::string::npos) {
+                                size_t start = keyPos + key.length() + 2;
+                                size_t end   = metaStr.find("\"", start);
+                                if (end != std::string::npos)
+                                    return metaStr.substr(start, end - start);
+                            }
+                            return "";
+                        };
 
-        foundAnything = true;
+                        currentAuthor   = extractMeta("author");
+                        currentSeverity = extractMeta("severity");
+                    }
+                } else {
+                    // Este o linie cu un string ($s1: ...)
+                    matchedStrings.push_back(line);
+                }
+            }
+            in.close();
 
-        // Detectăm linia header pentru o regulă
-        if (line.find(currentFile.string()) != std::string::npos && line.find('[') != std::string::npos && line.find(']') != std::string::npos) {
-            // Salvăm regula precedentă
-            if (!currentRule.empty() && !matchedStrings.empty()) {
-                matchCount++;
-                yaraOutput.push_back("    Rule: " + currentRule);
-                yaraOutput.push_back("    Tags: " + currentTags);
+            // === DUMP ULTIMA REGULĂ DIN FIȘIER ===
+            if (!currentRule.empty()) {
+                globalMatchCount++;
+                yaraLines.push_back({ "    [MATCH] Rule: " + currentRule, LineType::Normal });
+                if (!currentTags.empty())
+                yaraLines.push_back({ "    Tags: " + currentTags, LineType::Normal });
                 if (!currentAuthor.empty())
-                    yaraOutput.push_back("    Author: " + currentAuthor);
+                    yaraLines.push_back({ "    Author: " + currentAuthor, LineType::Normal });
                 if (!currentSeverity.empty())
-                    yaraOutput.push_back("    Severity: " + currentSeverity);
+                    yaraLines.push_back({ "    Severity: " + currentSeverity, LineType::Normal });
 
-                for (auto& s : matchedStrings)
-                    yaraOutput.push_back("        " + s);
-                yaraOutput.push_back("");
+                for (auto& s : matchedStrings) {
+                    yaraLines.push_back({ "        " + s, LineType::RuleContent });
+                    yaraLines.push_back({ "        At:", LineType::Normal });
 
-                matchedStrings.clear();
-                currentAuthor.clear();
-                currentSeverity.clear();
-                currentTags.clear();
+                    auto ctx = ExtractHexContextFromYaraMatch(s, currentFile.string());
+                    for (auto& ctxLine : ctx)
+                        yaraLines.push_back({ "                " + ctxLine, LineType::Normal });
+                }
+                yaraLines.push_back({ "", LineType::Normal });
+            } else if (!foundAnyInFile) {
+                // Dacă nu a găsit nimic în acest fișier de reguli
+                yaraLines.push_back({ "    [CLEAN] No matches for this rule.", LineType::Normal });
             }
 
-            // Extragem Rule name
-            size_t spacePos = line.find(' ');
-            currentRule     = line.substr(0, spacePos);
+        } else {
+            yaraLines.push_back({ "    [ERROR] Execution failed.", LineType::Normal });
+        }
+    }
 
-            // Extragem Tags
-            size_t firstBracketStart = line.find('[');
-            size_t firstBracketEnd   = line.find(']');
-            if (firstBracketStart != std::string::npos && firstBracketEnd != std::string::npos)
-                currentTags = line.substr(firstBracketStart + 1, firstBracketEnd - firstBracketStart - 1);
+    // ---------------------------------------------------------
+    // 6. SUMAR FINAL (Inserat la început)
+    // ---------------------------------------------------------
+    // Modificăm liniile rezervate la început
+    yaraLines[2].text = "Summary:";
+    yaraLines.insert(yaraLines.begin() + 3, { "    Total Matches: " + std::to_string(globalMatchCount), LineType::Normal });
+    yaraLines.insert(yaraLines.begin() + 4, { globalMatchCount > 0 ? "    Status: INFECTED" : "    Status: CLEAN", LineType::Normal });
+    yaraLines.insert(yaraLines.begin() + 5, { "", LineType::Normal });
 
-            // Extragem meta
-            size_t metaStart = line.find('[', firstBracketEnd + 1);
-            size_t metaEnd   = line.find(']', metaStart);
-            if (metaStart != std::string::npos && metaEnd != std::string::npos) {
-                std::string metaStr = line.substr(metaStart + 1, metaEnd - metaStart - 1);
+    yaraLines.push_back({ "=== SCAN COMPLETE ===", LineType::Normal });
 
-                // Author
-                size_t authorPos = metaStr.find("author=\"");
-                if (authorPos != std::string::npos) {
-                    size_t start = authorPos + strlen("author=\"");
-                    size_t end   = metaStr.find("\"", start);
-                    if (end != std::string::npos)
-                        currentAuthor = metaStr.substr(start, end - start);
-                }
+    yaraExecuted      = true;
+    yaraGetRulesFiles = true; // Previne reîncărcarea automată
+}
 
-                // Severity
-                size_t sevPos = metaStr.find("severity=\"");
-                if (sevPos != std::string::npos) {
-                    size_t start = sevPos + strlen("severity=\"");
-                    size_t end   = metaStr.find("\"", start);
-                    if (end != std::string::npos)
-                        currentSeverity = metaStr.substr(start, end - start);
-                }
+
+std::vector<std::string> Instance::ExtractHexContextFromYaraMatch(
+      const std::string& yaraLine,
+      const std::string& exePath,
+      size_t contextSize // bytes before & after
+    )
+{
+    std::vector<std::string> output;
+
+    // 1️⃣ Extragem offset-ul (0x....)
+    size_t pos = yaraLine.find(':');
+    if (pos == std::string::npos)
+        return output;
+
+    std::string offsetStr = yaraLine.substr(0, pos);
+    uint64_t offset       = 0;
+    try {
+        offset = std::stoull(offsetStr, nullptr, 16);
+    } catch (...) {
+        output.push_back("EROARE: Offset invalid în linia YARA.");
+        return output;
+    }
+
+    // 2️⃣ Deschidem fișierul EXE
+    std::ifstream file(exePath, std::ios::binary);
+    if (!file.is_open()) {
+        output.push_back("EROARE: Nu pot deschide fișierul.");
+        return output;
+    }
+
+    // 3️⃣ Calculăm zona de citire
+    uint64_t startOffset = (offset > contextSize) ? offset - contextSize : 0;
+    size_t readSize      = contextSize * 2;
+
+    file.seekg(startOffset, std::ios::beg);
+
+    std::vector<uint8_t> buffer(readSize);
+    file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+    size_t bytesRead = file.gcount();
+
+    // 4️⃣ Format HEX + ASCII (16 bytes pe linie)
+    size_t lineSize = 16;
+    for (size_t i = 0; i < bytesRead; i += lineSize) {
+        std::ostringstream line;
+        std::ostringstream ascii;
+
+        // hex și ascii
+        for (size_t j = 0; j < lineSize; j++) {
+            if (i + j < bytesRead) {
+                uint8_t b = buffer[i + j];
+                line << std::setw(2) << std::setfill('0') << std::hex << std::uppercase << static_cast<int>(b) << ' ';
+                ascii << (std::isprint(b) ? static_cast<char>(b) : '.');
+            } else {
+                line << "   "; // padding pentru ultima linie
             }
-
-            continue; // nu adăugăm linia header la matched strings
         }
 
-        // Altfel, este o linie detectată (matched string)
-        matchedStrings.push_back(line);
+        std::ostringstream fullLine;
+        fullLine << "0x" << std::setw(8) << std::setfill('0') << std::hex << (startOffset + i) << "  " << line.str() << " " << ascii.str();
+
+        output.push_back(fullLine.str());
     }
 
-    // Salvăm ultima regulă detectată
-    if (!currentRule.empty() && !matchedStrings.empty()) {
-        matchCount++;
-        yaraOutput.push_back("    Rule: " + currentRule);
-        yaraOutput.push_back("    Tags: " + currentTags);
-        if (!currentAuthor.empty())
-            yaraOutput.push_back("    Author: " + currentAuthor);
-        if (!currentSeverity.empty())
-            yaraOutput.push_back("    Severity: " + currentSeverity);
+    // 5️⃣ Header cu offset original
+    std::ostringstream header;
+    header << "File offset: 0x" << std::hex << std::uppercase << offset;
+    output.insert(output.begin(), header.str());
 
-        for (auto& s : matchedStrings)
-            yaraOutput.push_back("        " + s);
-    }
-
-    // ================= SUMMARY =================
-    //yaraOutput.insert(yaraOutput.begin() + 4, ""); // linie goală
-    yaraOutput.insert(yaraOutput.begin() + 5, "Summary:");
-    yaraOutput.insert(yaraOutput.begin() + 6, "    Matches: " + std::to_string(matchCount));
-    yaraOutput.insert(yaraOutput.begin() + 7, matchCount > 0 ? "    Status: INFECTED" : "    Status: CLEAN");
-    yaraOutput.insert(yaraOutput.begin() + 8, ""); // linie goală
-    yaraOutput.insert(yaraOutput.begin() + 9, "Matches:"); 
-
-
-
-    yaraExecuted = true;
+    return output;
 }
