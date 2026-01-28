@@ -11,7 +11,9 @@ namespace GView::View::YaraViewer
     namespace Commands
     {
         constexpr int DEMOVIEWER_SOME_CMD = 0x01;
+        constexpr int DEMOVIEWER_SOME_CMD_VIEW_RULES = 0x02;
         static KeyboardControl SomeCommand = { Input::Key::F6, "Yara Run", "SomeCommand explanation", DEMOVIEWER_SOME_CMD };
+        static KeyboardControl SomeCommandViewRules  = { Input::Key::F7, "View Rules", "View all the rules from folder rules", DEMOVIEWER_SOME_CMD_VIEW_RULES };
 
     }
 
