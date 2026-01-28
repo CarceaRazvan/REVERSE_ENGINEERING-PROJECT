@@ -127,7 +127,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="TestYara.cpp" />
+    <ClCompile Include="Encoded_String.cpp" />
+    <ClCompile Include="Simple_C2_Beacon.cpp" />
+    <ClCompile Include="SuspiciousAdminTool.cpp" />
+    <ClCompile Include="TestYara.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Text Include="CMakeLists.txt" />

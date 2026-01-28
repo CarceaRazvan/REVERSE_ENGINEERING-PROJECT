@@ -1061,7 +1061,7 @@ std::vector<std::string> Instance::ExtractHexContextFromYaraMatch(
 {
     std::vector<std::string> output;
 
-    // 1️⃣ Extragem offset-ul (0x....)
+    // 1️ Extragem offset-ul (0x....)
     size_t pos = yaraLine.find(':');
     if (pos == std::string::npos)
         return output;
@@ -1075,14 +1075,14 @@ std::vector<std::string> Instance::ExtractHexContextFromYaraMatch(
         return output;
     }
 
-    // 2️⃣ Deschidem fișierul EXE
+    // 2️ Deschidem fișierul EXE
     std::ifstream file(exePath, std::ios::binary);
     if (!file.is_open()) {
         output.push_back("EROARE: Nu pot deschide fișierul.");
         return output;
     }
 
-    // 3️⃣ Calculăm zona de citire
+    // 3️ Calculăm zona de citire
     uint64_t startOffset = (offset > contextSize) ? offset - contextSize : 0;
     size_t readSize      = contextSize * 2;
 
@@ -1092,7 +1092,7 @@ std::vector<std::string> Instance::ExtractHexContextFromYaraMatch(
     file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
     size_t bytesRead = file.gcount();
 
-    // 4️⃣ Format HEX + ASCII (16 bytes pe linie)
+    // 4 Format HEX + ASCII (16 bytes pe linie)
     size_t lineSize = 16;
     for (size_t i = 0; i < bytesRead; i += lineSize) {
         std::ostringstream line;
@@ -1115,7 +1115,7 @@ std::vector<std::string> Instance::ExtractHexContextFromYaraMatch(
         output.push_back(fullLine.str());
     }
 
-    // 5️⃣ Header cu offset original
+    // 5️ Header cu offset original
     std::ostringstream header;
     header << "File offset: 0x" << std::hex << std::uppercase << offset;
     output.insert(output.begin(), header.str());

@@ -1,4 +1,9 @@
-add_executable(TestYara test_yara.cpp)
+cmake_minimum_required(VERSION 3.13)
+project(TestYara)
 
-# Leag YARA la target
-target_link_libraries(TestYara PRIVATE YARA::YARA)
+set(CMAKE_CXX_STANDARD 17)
+
+#add_executable(hello_world TestYara.cpp)
+#add_executable(suspicious_admin SuspiciousAdminTool.cpp)
+#add_executable(encoded_string Encoded_String.cpp)
+add_executable(simple_beacon Simple_C2_Beacon.cpp)
