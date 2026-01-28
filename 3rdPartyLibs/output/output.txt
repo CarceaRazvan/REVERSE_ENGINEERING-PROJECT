@@ -1,0 +1,7 @@
+hello_str [test,demo,poc] [description="A simple proof-of-concept to show YARA rules",author="Carcea Razvan",severity="low"] D:\REPOs\REVERSE_ENGINEERING-PROJECT\build\x64\Debug\TestYara.exe
+0x9828:$hello: Hello
+0x982e:$world: World
+world_str [malware,demo] [description="Demo",author="Carcea Diana",severity="high"] D:\REPOs\REVERSE_ENGINEERING-PROJECT\build\x64\Debug\TestYara.exe
+0x982e:$world: World
+world_str_andrei [trojan,poc] [description="Demo",author="Carcea Andrei",severity="very high"] D:\REPOs\REVERSE_ENGINEERING-PROJECT\build\x64\Debug\TestYara.exe
+0x982e:$world: World
