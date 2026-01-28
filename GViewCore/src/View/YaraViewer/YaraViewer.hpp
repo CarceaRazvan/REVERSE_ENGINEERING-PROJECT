@@ -50,16 +50,15 @@ namespace GView::View::YaraViewer
         Match
     };
 
-    // Structura care ține datele
     struct LineInfo {
         std::string text;
         LineType type;
-        bool isChecked;                 // True dacă regula e selectată
-        std::filesystem::path filePath; // Calea către fișierul .yara
-        bool isExpanded;                // Only used if type == Match
-        int indentLevel;                // Visual indentation
-        int parentIndex;                // Index of the parent line (-1 if root)
-        bool isVisible;				  // Used for collapsible sections
+        bool isChecked = false;
+        std::filesystem::path filePath;
+        bool isExpanded = true; // Default EXPANDAT
+        int indentLevel = 0;
+        int parentIndex = -1;
+        bool isVisible  = true; // Default VIZIBIL
     };
 
     class Instance : public View::ViewControl
@@ -75,7 +74,7 @@ namespace GView::View::YaraViewer
         //std::vector<std::string> yaraOutput;  
         std::vector<LineInfo> yaraLines;
 
-
+        std::vector<size_t> visibleIndices;
 
      public:
         uint32 startViewLine;
@@ -121,6 +120,9 @@ namespace GView::View::YaraViewer
         void ToggleSelection();
         void SelectAllRules();   
         void DeselectAllRules(); 
+
+        void UpdateVisibleIndices();   // Recalculează ce e vizibil
+        void ToggleFold(size_t index); // Deschide/Închide folder
 
         std::vector<std::string> ExtractHexContextFromYaraMatch(const std::string& yaraLine, const std::string& exePath, size_t contextSize = 16);
 
