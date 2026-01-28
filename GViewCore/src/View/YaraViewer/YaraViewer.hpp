@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Internal.hpp"
 
@@ -11,7 +11,7 @@ namespace GView::View::YaraViewer
     namespace Commands
     {
         constexpr int DEMOVIEWER_SOME_CMD = 0x01;
-        static KeyboardControl SomeCommand = { Input::Key::F6, "SomeCommand", "SomeCommand explanation", DEMOVIEWER_SOME_CMD };
+        static KeyboardControl SomeCommand = { Input::Key::F6, "Yara Run", "SomeCommand explanation", DEMOVIEWER_SOME_CMD };
 
     }
 
@@ -43,8 +43,18 @@ namespace GView::View::YaraViewer
         static Config config;
         Layout layout;
 
+        bool yaraExecuted = false;  
+        bool yaraGetRulesFiles = false;
+        std::vector<std::string> yaraOutput;  
+
+
 
      public:
+        uint32 startViewLine;
+        uint32 leftViewCol;
+        uint32 cursorRow;
+        uint32 cursorCol;
+
         Instance(Reference<GView::Object> _obj, Settings* _settings);
 
         bool GetPropertyValue(uint32 propertyID, PropertyValue& value) override;
@@ -62,9 +72,15 @@ namespace GView::View::YaraViewer
         bool AddCategoryBeforePropertyNameWhenSerializing() const override;
         void Paint(Graphics::Renderer& renderer) override;
         bool OnUpdateCommandBar(Application::CommandBar& commandBar) override;
-        bool UpdateKeys(KeyboardControlsInterface*) override;
+        bool UpdateKeys(KeyboardControlsInterface* interfaceParam) override;
         bool OnEvent(Reference<Control>, Event eventType, int ID) override;
         void OnAfterResize(int newWidth, int newHeight) override;
+        bool OnKeyEvent(AppCUI::Input::Key keyCode, char16 characterCode) override;
+        void MoveTo();
+        bool OnMouseWheel(int x, int y, AppCUI::Input::MouseWheel direction, AppCUI::Input::Key key) override;
+
+        void RunYara();  
+        void GetRulesFiles();
 
     };
 
