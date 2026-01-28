@@ -33,7 +33,9 @@ Instance::Instance(Reference<GView::Object> _obj, Settings* _settings)
     this->startViewLine = 0;
     this->leftViewCol   = 0;
 
-
+    this->selectionActive    = false;
+    this->selectionAnchorRow = 0;
+    this->selectionAnchorCol = 0;
 
     // settings
     if ((_settings) && (_settings->data))
@@ -134,12 +136,27 @@ void Instance::Paint(Graphics::Renderer& renderer)
     ColorPair textCursor  = ColorPair{ Color::Black, Color::White };
     ColorPair arrowColor  = ColorPair{ Color::Green, Color::Transparent };
     ColorPair marginColor = ColorPair{ Color::Gray, Color::Transparent };
+    ColorPair textSelection = ColorPair{ Color::Black, Color::Silver };
+
 
     uint32 rows           = this->GetHeight();
     uint32 width          = this->GetWidth();
     const int LEFT_MARGIN = 4;
 
+    uint32 selStartRow = this->cursorRow;
+    uint32 selStartCol = this->cursorCol;
+    uint32 selEndRow   = this->selectionAnchorRow;
+    uint32 selEndCol   = this->selectionAnchorCol;
+
     GetRulesFiles();
+
+    if (this->selectionActive) {
+        // Ordonăm coordonatele: Start trebuie să fie mai mic decât End
+        if (selStartRow > selEndRow || (selStartRow == selEndRow && selStartCol > selEndCol)) {
+            std::swap(selStartRow, selEndRow);
+            std::swap(selStartCol, selEndCol);
+        }
+    }
 
 
     // Iterăm prin rândurile de pe ecran
@@ -160,25 +177,59 @@ void Instance::Paint(Graphics::Renderer& renderer)
             renderer.WriteSingleLineText(1, tr, "->", arrowColor);
         }
 
-        // 2. Calculăm ce porțiune din text se vede (Scroll Orizontal)
         if (currentLineStr.length() > this->leftViewCol) {
             std::string_view view = currentLineStr;
-            // Tăiem partea din stânga care nu se vede
-            view = view.substr(this->leftViewCol);
+            view                  = view.substr(this->leftViewCol);
 
-            // Desenăm caracter cu caracter pentru a trata cursorul
             for (uint32 i = 0; i < view.length(); i++) {
-                // Dacă depășim lățimea ecranului, ne oprim
                 if (LEFT_MARGIN + i >= width)
                     break;
 
-                // Verificăm dacă cursorul e pe acest caracter
-                // Cursorul e pe linia curentă ȘI la coloana curentă (leftViewCol + i)
-                bool isCursor = (lineIndex == this->cursorRow) && ((this->leftViewCol + i) == this->cursorCol);
+                // Coordonata absolută a caracterului curent
+                uint32 absCol = this->leftViewCol + i;
 
-                renderer.WriteCharacter(LEFT_MARGIN + i, tr, view[i], isCursor ? textCursor : textNormal);
+                // Culoarea implicită
+                ColorPair currentColor = textNormal;
+
+                // --- VERIFICARE SELECȚIE ---
+                if (this->selectionActive) {
+                    bool isSelected = false;
+
+                    // Cazul 1: Linia e complet în interiorul selecției (între rândul de start și cel de final)
+                    if (lineIndex > selStartRow && lineIndex < selEndRow) {
+                        isSelected = true;
+                    }
+                    // Cazul 2: Selecția e pe o singură linie
+                    else if (lineIndex == selStartRow && lineIndex == selEndRow) {
+                        if (absCol >= selStartCol && absCol < selEndCol)
+                            isSelected = true;
+                    }
+                    // Cazul 3: Este linia de început (selectăm de la coloana Start până la capăt)
+                    else if (lineIndex == selStartRow) {
+                        if (absCol >= selStartCol)
+                            isSelected = true;
+                    }
+                    // Cazul 4: Este linia de sfârșit (selectăm de la început până la coloana End)
+                    else if (lineIndex == selEndRow) {
+                        if (absCol < selEndCol)
+                            isSelected = true;
+                    }
+
+                    if (isSelected)
+                        currentColor = textSelection;
+                }
+                // ---------------------------
+
+                // --- VERIFICARE CURSOR ---
+                // Cursorul are prioritate maximă (suprascrie selecția)
+                bool isCursor = (lineIndex == this->cursorRow && absCol == this->cursorCol);
+                if (isCursor)
+                    currentColor = textCursor;
+
+                renderer.WriteCharacter(LEFT_MARGIN + i, tr, view[i], currentColor);
             }
         }
+
 
         // 3. Desenăm cursorul dacă e la finalul liniei sau pe o linie goală
         // (Când cursorCol este egal cu lungimea liniei)
@@ -235,6 +286,12 @@ void Instance::OnAfterResize(int newWidth, int newHeight)
 
 bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
 {
+
+    if (keyCode == (Key::Ctrl | Key::C)) {
+        CopySelectionToClipboard();
+        return true;
+    }
+
     switch (keyCode) {
     case Key::Right:
         // Putem merge până la lungimea liniei (pentru a putea adăuga text teoretic)
@@ -337,6 +394,144 @@ bool Instance::OnMouseWheel(int x, int y, AppCUI::Input::MouseWheel direction, A
     }
 
     return false;
+}
+
+static void ComputeMouseCoords(int x, int y, uint32 startViewLine, uint32 leftViewCol, const std::vector<std::string>& lines, uint32& outRow, uint32& outCol)
+{
+    const int LEFT_MARGIN = 4; // Trebuie să fie identic cu cel din Paint()
+
+    // 1. Calculăm rândul
+    // Adunăm offset-ul de scroll vertical (startViewLine) la poziția Y a mouse-ului
+    uint32 r = startViewLine + y;
+
+    // Verificăm limitele verticale
+    if (lines.empty()) {
+        r = 0;
+    } else if (r >= lines.size()) {
+        r = (uint32) lines.size() - 1;
+    }
+    outRow = r;
+
+    // 2. Calculăm coloana
+    // Scădem marginea din stânga și adunăm scroll-ul orizontal
+    int val = (int) leftViewCol + (x - LEFT_MARGIN);
+    if (val < 0)
+        val = 0; // Dacă dăm click pe margine (linia verticală)
+    uint32 c = (uint32) val;
+
+    // Verificăm limitele orizontale (să nu punem cursorul după sfârșitul liniei)
+    if (outRow < lines.size()) {
+        if (c > lines[outRow].length()) {
+            c = (uint32) lines[outRow].length();
+        }
+    } else {
+        c = 0;
+    }
+    outCol = c;
+}
+
+void Instance::OnMousePressed(int x, int y, AppCUI::Input::MouseButton button, AppCUI::Input::Key keyCode)
+{
+    // Ne interesează doar Click Stânga
+    if ((button & MouseButton::Left) == MouseButton::None)
+        return;
+
+    if (this->yaraOutput.empty())
+        return;
+
+    // 1. Calculăm unde am dat click
+    ComputeMouseCoords(x, y, this->startViewLine, this->leftViewCol, this->yaraOutput, this->cursorRow, this->cursorCol);
+
+    // 2. Setăm ANCORA și resetăm selecția
+    // Când apeși click, selecția veche dispare, și începe una nouă de la punctul curent
+    this->selectionAnchorRow = this->cursorRow;
+    this->selectionAnchorCol = this->cursorCol;
+    this->selectionActive    = false;
+
+    // 3. Facem update la view (MoveTo va asigura că cursorul e vizibil)
+    MoveTo();
+}
+
+bool Instance::OnMouseDrag(int x, int y, AppCUI::Input::MouseButton button, AppCUI::Input::Key keyCode)
+{
+    // Ne interesează doar Drag cu Stânga
+    if ((button & MouseButton::Left) == MouseButton::None)
+        return false;
+
+    if (this->yaraOutput.empty())
+        return false;
+
+    // 1. Mutăm CURSORUL la noua poziție a mouse-ului
+    ComputeMouseCoords(x, y, this->startViewLine, this->leftViewCol, this->yaraOutput, this->cursorRow, this->cursorCol);
+
+    // 2. Activăm selecția
+    // Dacă cursorul s-a mișcat față de ancoră, înseamnă că avem text selectat
+    if (this->cursorRow != this->selectionAnchorRow || this->cursorCol != this->selectionAnchorCol) {
+        this->selectionActive = true;
+    }
+
+    // 3. Scroll automat
+    // MoveTo va face scroll automat dacă tragi mouse-ul în afara ferestrei
+    MoveTo();
+
+    return true; // Returnăm true ca să spunem că am procesat evenimentul
+}
+
+void Instance::CopySelectionToClipboard()
+{
+    // Variabila în care vom construi textul
+    std::string textToCopy;
+
+    // 1. ZONA CRITICĂ (Citim datele protejat)
+    {
+        if (!this->selectionActive || this->yaraOutput.empty())
+            return;
+
+        // a) Ordonăm coordonatele (Start trebuie să fie înainte de End)
+        uint32 r1 = this->cursorRow;
+        uint32 c1 = this->cursorCol;
+        uint32 r2 = this->selectionAnchorRow;
+        uint32 c2 = this->selectionAnchorCol;
+
+        // Dacă cursorul e deasupra ancorei, facem swap
+        if (r1 > r2 || (r1 == r2 && c1 > c2)) {
+            std::swap(r1, r2);
+            std::swap(c1, c2);
+        }
+
+        // b) Iterăm prin liniile selectate
+        for (uint32 r = r1; r <= r2; r++) {
+            if (r >= this->yaraOutput.size())
+                break;
+
+            const std::string& line = this->yaraOutput[r];
+
+            // Calculăm indecșii de tăiere pentru linia curentă
+            uint32 start = (r == r1) ? c1 : 0;
+            uint32 end   = (r == r2) ? c2 : (uint32) line.length();
+
+            // Validări de siguranță (să nu crape substr)
+            if (start > line.length())
+                start = (uint32) line.length();
+            if (end > line.length())
+                end = (uint32) line.length();
+
+            if (end > start) {
+                textToCopy += line.substr(start, end - start);
+            }
+
+            // Adăugăm NewLine dacă nu suntem la ultima linie
+            if (r < r2) {
+                textToCopy += "\r\n"; // Format standard Windows
+            }
+        }
+    }
+    // AICI se termină lock-ul. Mutex-ul este eliberat.
+
+    // 2. TRIMITEM LA CLIPBOARD (OS Call - facem asta fără mutex)
+    if (!textToCopy.empty()) {
+        AppCUI::OS::Clipboard::SetText(textToCopy);
+    }
 }
 
 void Instance::GetRulesFiles()

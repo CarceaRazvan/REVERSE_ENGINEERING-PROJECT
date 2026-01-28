@@ -55,6 +55,10 @@ namespace GView::View::YaraViewer
         uint32 cursorRow;
         uint32 cursorCol;
 
+        bool selectionActive;
+        uint32 selectionAnchorRow;
+        uint32 selectionAnchorCol;
+
         Instance(Reference<GView::Object> _obj, Settings* _settings);
 
         bool GetPropertyValue(uint32 propertyID, PropertyValue& value) override;
@@ -78,6 +82,9 @@ namespace GView::View::YaraViewer
         bool OnKeyEvent(AppCUI::Input::Key keyCode, char16 characterCode) override;
         void MoveTo();
         bool OnMouseWheel(int x, int y, AppCUI::Input::MouseWheel direction, AppCUI::Input::Key key) override;
+        bool OnMouseDrag(int x, int y, Input::MouseButton button, Input::Key keyCode) override;
+        void OnMousePressed(int x, int y, Input::MouseButton button, Input::Key keyCode) override;
+        void CopySelectionToClipboard();
 
         void RunYara();  
         void GetRulesFiles();
