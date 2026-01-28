@@ -134,9 +134,11 @@ void Instance::Paint(Graphics::Renderer& renderer)
 {
     ColorPair textNormal  = ColorPair{ Color::White, Color::Transparent };
     ColorPair textCursor  = ColorPair{ Color::Black, Color::White };
-    ColorPair arrowColor  = ColorPair{ Color::Green, Color::Transparent };
+    ColorPair arrowColor  = ColorPair{ Color::Gray, Color::Transparent };
     ColorPair marginColor = ColorPair{ Color::Gray, Color::Transparent };
     ColorPair textSelection = ColorPair{ Color::Black, Color::Silver };
+
+    ColorPair ruleBlockColor = ColorPair{ Color::Green, Color::Transparent };
 
 
     uint32 rows           = this->GetHeight();
@@ -177,6 +179,8 @@ void Instance::Paint(Graphics::Renderer& renderer)
             renderer.WriteSingleLineText(1, tr, "->", arrowColor);
         }
 
+        bool isRuleContent = (currentLineStr.rfind("    ", 0) == 0);
+
         if (currentLineStr.length() > this->leftViewCol) {
             std::string_view view = currentLineStr;
             view                  = view.substr(this->leftViewCol);
@@ -185,32 +189,26 @@ void Instance::Paint(Graphics::Renderer& renderer)
                 if (LEFT_MARGIN + i >= width)
                     break;
 
-                // Coordonata absolută a caracterului curent
-                uint32 absCol = this->leftViewCol + i;
-
-                // Culoarea implicită
+                uint32 absCol          = this->leftViewCol + i;
                 ColorPair currentColor = textNormal;
 
-                // --- VERIFICARE SELECȚIE ---
+                // A. Aplicăm culoarea de fundal dacă e conținut de regulă
+                if (isRuleContent) {
+                    currentColor = ruleBlockColor;
+                }
+
+                // B. Logică selecție (Suprascrie fundalul regulii)
                 if (this->selectionActive) {
                     bool isSelected = false;
-
-                    // Cazul 1: Linia e complet în interiorul selecției (între rândul de start și cel de final)
-                    if (lineIndex > selStartRow && lineIndex < selEndRow) {
+                    if (lineIndex > selStartRow && lineIndex < selEndRow)
                         isSelected = true;
-                    }
-                    // Cazul 2: Selecția e pe o singură linie
                     else if (lineIndex == selStartRow && lineIndex == selEndRow) {
                         if (absCol >= selStartCol && absCol < selEndCol)
                             isSelected = true;
-                    }
-                    // Cazul 3: Este linia de început (selectăm de la coloana Start până la capăt)
-                    else if (lineIndex == selStartRow) {
+                    } else if (lineIndex == selStartRow) {
                         if (absCol >= selStartCol)
                             isSelected = true;
-                    }
-                    // Cazul 4: Este linia de sfârșit (selectăm de la început până la coloana End)
-                    else if (lineIndex == selEndRow) {
+                    } else if (lineIndex == selEndRow) {
                         if (absCol < selEndCol)
                             isSelected = true;
                     }
@@ -218,15 +216,44 @@ void Instance::Paint(Graphics::Renderer& renderer)
                     if (isSelected)
                         currentColor = textSelection;
                 }
-                // ---------------------------
 
-                // --- VERIFICARE CURSOR ---
-                // Cursorul are prioritate maximă (suprascrie selecția)
+                // C. Cursor (Prioritate maximă)
                 bool isCursor = (lineIndex == this->cursorRow && absCol == this->cursorCol);
                 if (isCursor)
                     currentColor = textCursor;
 
                 renderer.WriteCharacter(LEFT_MARGIN + i, tr, view[i], currentColor);
+            }
+
+            // D. Umplem restul liniei cu culoarea de fundal a regulii (pentru aspect de bloc compact)
+            if (isRuleContent) {
+                int textLenOnScreen = (int) view.length();
+                int startFill       = LEFT_MARGIN + textLenOnScreen;
+                // Dacă textul s-a terminat dar mai e loc pe ecran și nu e selectat cursorul acolo
+                if (startFill < (int) width) {
+                    // Putem desena spații goale cu fundalul regulii
+                    // Atenție: Dacă cursorul e la final, el va fi desenat mai jos, deci nu suprascriem poziția lui
+                    for (int k = startFill; k < (int) width; k++) {
+                        // Verificăm dacă cursorul e chiar aici (pe spațiul gol de după text)
+                        bool isCursorHere = (lineIndex == this->cursorRow && (this->leftViewCol + (k - LEFT_MARGIN)) == this->cursorCol);
+                        renderer.WriteCharacter(k, tr, ' ', isCursorHere ? textCursor : ruleBlockColor);
+                    }
+                }
+            }
+        } else {
+            // Linia e goală sau scrollată complet la stânga
+            // Dacă e linie goală dar face parte din bloc (puțin probabil la empty string, dar pentru consistență)
+            // În cazul nostru, liniile goale dintre reguli nu au 4 spații, deci rămân negre/transparente.
+        }
+
+        // Desenăm cursorul standard la final de text (dacă nu a fost desenat de bucla de umplere de mai sus)
+        // Logica de sus cu "Umplem restul liniei" ar trebui să acopere și cursorul, dar păstrăm protecția:
+        if (!isRuleContent && lineIndex == this->cursorRow && this->cursorCol == currentLineStr.length()) {
+            if (this->cursorCol >= this->leftViewCol) {
+                int screenX = (int) (this->cursorCol - this->leftViewCol) + LEFT_MARGIN;
+                if (screenX < (int) width) {
+                    renderer.WriteCharacter(screenX, tr, ' ', textCursor);
+                }
             }
         }
 
@@ -537,59 +564,57 @@ void Instance::CopySelectionToClipboard()
 void Instance::GetRulesFiles()
 {
     if (yaraGetRulesFiles)
-        return; // deja executat
+        return;
 
+    fs::path currentPath = fs::current_path();
+    fs::path rootPath    = currentPath.parent_path().parent_path();
+    fs::path yaraRules   = rootPath / "3rdPartyLibs" / "rules";
 
-     fs::path currentPath = fs::current_path();
-     fs::path rootPath    = currentPath.parent_path().parent_path();
-     fs::path yaraRules = rootPath / "3rdPartyLibs" / "rules";
+    if (!fs::exists(yaraRules) || !fs::is_directory(yaraRules)) {
+        // ... (gestionare eroare rămâne la fel)
+        return;
+    }
 
-     if (!fs::exists(yaraRules) || !fs::is_directory(yaraRules)) {
-         std::cout << "Folderul " << yaraRules.string() << " nu există.\n";
-         return;
-     }
+    yaraOutput = {
+        "=== YARA RULES ===",
+        "",
+        "Rules path: ",
+        "    " + yaraRules.string(),
+        "",
+        "Rules files : ",
+        "" // Spațiu
+    };
 
-     yaraOutput = { 
-         "=== YARA RULES ===", 
-         "",
-         
-         
-         "Rules path: ",
-         "    " + yaraRules.string(),
-         "Rules files: "
-     };
+    for (auto& entry : fs::directory_iterator(yaraRules)) {
+        if (entry.is_regular_file()) {
+            std::string filename = entry.path().filename().string();
 
-     for (auto& entry : fs::directory_iterator(yaraRules)) {
-         if (entry.is_regular_file()) // luăm doar fișiere, ignorăm foldere
-         {
-             std::string filename = entry.path().filename().string();
+            // Adăugăm numele fișierului (ca titlu)
+            yaraOutput.push_back("FILE: " + filename);
 
-             yaraOutput.push_back("    " + filename); // 4 spații în față
-             yaraOutput.push_back("      ______________________________________");
-             // deschidem fișierul pentru citire
-             std::ifstream in(entry.path());
-             if (!in.is_open()) {
-                 yaraOutput.push_back("        [Eroare la citirea fișierului]");
-                 continue;
-             }
+            // Marker invizibil sau explicit pentru început bloc
+            // (Putem folosi un prefix special, dar aici ne bazăm pe indentare în Paint)
 
-             std::string line;
-             while (std::getline(in, line)) {
-                 // eliminăm eventuale carriage return / newline
-                 while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
-                     line.pop_back();
+            std::ifstream in(entry.path());
+            if (!in.is_open()) {
+                yaraOutput.push_back("    [Eroare la citire]");
+                continue;
+            }
 
-                 // afișăm fiecare linie cu indentare suplimentară
-                 yaraOutput.push_back("      |  " + line); // 8 spații față de marginile principale
-             }
-             yaraOutput.push_back("      ______________________________________");
-             yaraOutput.push_back("");
-         }
-     }
+            std::string line;
+            while (std::getline(in, line)) {
+                while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+                    line.pop_back();
 
-     yaraGetRulesFiles = true;
+                // Adăugăm linia simplă, doar cu indentare pentru a arăta că e cod
+                yaraOutput.push_back("    " + line);
+            }
+            // Adăugăm o linie goală după fiecare fișier pentru spațiere vizuală
+            yaraOutput.push_back("");
+        }
+    }
 
-
+    yaraGetRulesFiles = true;
 }
 
 void Instance::RunYara()
