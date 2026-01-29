@@ -129,6 +129,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Encoded_String.cpp" />
+    <ClCompile Include="ExampleProgram.cpp" />
     <ClCompile Include="Simple_C2_Beacon.cpp" />
     <ClCompile Include="SuspiciousAdminTool.cpp" />
     <ClCompile Include="TestYara.cpp">
