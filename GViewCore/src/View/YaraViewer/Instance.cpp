@@ -1,17 +1,15 @@
 ﻿#include "YaraViewer.hpp"
 #include <algorithm>
-#include <cstdlib> // pentru std::system
+#include <cstdlib> 
 #include <iostream>
-#include <fstream>   // pentru std::ifstream
-#include <string>    // pentru std::string
+#include <fstream>   
+#include <string>    
 #include <codecvt>
 #include <locale>
 
 #include <windows.h>
 #include <shellapi.h>
 #undef MessageBox
-//#define MessageBox MessageBoxW 
-
 
 using namespace GView::View::YaraViewer;
 using namespace AppCUI::Input;
@@ -20,8 +18,6 @@ namespace fs = std::filesystem;
 Config Instance::config;
 
 constexpr int startingX = 5;
-
-
 
 Instance::Instance(Reference<GView::Object> _obj, Settings* _settings)
     : ViewControl("Yara View", UserControlFlags::ShowVerticalScrollBar | UserControlFlags::ScrollBarOutsideControl), settings(nullptr)
@@ -54,10 +50,7 @@ Instance::Instance(Reference<GView::Object> _obj, Settings* _settings)
         config.Initialize();
 
     layout.visibleLines = 1;
-
     layout.maxCharactersPerLine = 10;
-
-       
 }
 
 
@@ -76,23 +69,31 @@ bool Instance::IsPropertyValueReadOnly(uint32 propertyID)
 {
     NOT_IMPLEMENTED(false)
 }
-
 const vector<Property> Instance::GetPropertiesList()
 {
     return {};
 }
-
 bool Instance::GoTo(uint64 offset)
 {
     NOT_IMPLEMENTED(false)
 }
-
 bool Instance::Select(uint64 offset, uint64 size)
 {
     NOT_IMPLEMENTED(false)
 }
-
 bool Instance::ShowGoToDialog()
+{
+    NOT_IMPLEMENTED(false)
+} 
+std::string_view Instance::GetCategoryNameForSerialization() const
+{
+    return "YaraViewer";
+}
+bool Instance::AddCategoryBeforePropertyNameWhenSerializing() const
+{
+    return true;
+}
+bool Instance::ShowCopyDialog()
 {
     NOT_IMPLEMENTED(false)
 }
@@ -163,7 +164,7 @@ bool Instance::ShowFindDialog()
         }
     }
 
-        AppCUI::Dialogs::MessageBox::ShowError("Not Found", "Text '" + text + "' not found!");
+    AppCUI::Dialogs::MessageBox::ShowError("Not Found", "Text '" + text + "' not found!");
     
     return true;
 }
@@ -282,10 +283,7 @@ void Instance::SelectMatch(uint32 visualRow, size_t startRawCol, uint32 length)
     MoveTo();
 }
 
-bool Instance::ShowCopyDialog()
-{
-    NOT_IMPLEMENTED(false)
-}
+
 void Instance::PaintCursorInformation(AppCUI::Graphics::Renderer& renderer, uint32 width, uint32 height)
 {
     if (height == 0)
@@ -297,17 +295,6 @@ void Instance::PaintCursorInformation(AppCUI::Graphics::Renderer& renderer, uint
 
     renderer.Clear(' ', cfgColor);
     renderer.WriteSingleLineText(1, 0, info.GetText(), cfgColor);
-}
-
-
-std::string_view Instance::GetCategoryNameForSerialization() const
-{
-    return "YaraViewer";
-}
-
-bool Instance::AddCategoryBeforePropertyNameWhenSerializing() const
-{
-    return true;
 }
 
 void Instance::Paint(Graphics::Renderer& renderer)
@@ -475,7 +462,6 @@ void Instance::Paint(Graphics::Renderer& renderer)
     }
 }
 
-
 bool Instance::OnUpdateCommandBar(Application::CommandBar& commandBar)
 {
     if (!yaraExecuted) {
@@ -514,8 +500,6 @@ bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
 {
     if (eventType != Event::Command)
         return false;
-
-
 
     if (ID == Commands::YaraRunCommand.CommandId) {
         auto result = AppCUI::Dialogs::MessageBox::ShowOkCancel("Run Yara", "Are you sure?");

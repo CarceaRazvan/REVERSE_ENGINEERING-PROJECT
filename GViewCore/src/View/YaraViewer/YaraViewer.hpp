@@ -51,21 +51,21 @@ namespace GView::View::YaraViewer
        
     enum class LineType {
         Normal,
-        FileHeader,  // Aici vom avea checkbox [ ] / [x]
-        RuleContent, // Pentru fundal colorat
-        Info,
-        Match
+        FileHeader,  // Conține checkbox [ ] sau [x] și numele fișierului
+        RuleContent, // Conținutul regulii (poate fi colorat diferit)
+        Info,        // Mesaje informative (galben/albastru)
+        Match        // Linii care indică o potrivire (MATCH)
     };
 
     struct LineInfo {
         std::string text;
         LineType type;
-        bool isChecked = false;
+        bool isChecked = false;         // Pentru FileHeader
         std::filesystem::path filePath;
-        bool isExpanded = true; // Default EXPANDAT
-        int indentLevel = 0;
-        int parentIndex = -1;
-        bool isVisible  = true; // Default VIZIBIL
+        bool isExpanded = true;         // Dacă conținutul de sub header e vizibil
+        int indentLevel = 0;            // Nivel indentare (0 = root, 1 = interior)
+        int parentIndex = -1;           // Indexul părintelui (pentru folding)
+        bool isVisible  = true;         // Dacă linia trebuie desenată
     };
 
     class Instance : public View::ViewControl
@@ -76,119 +76,136 @@ namespace GView::View::YaraViewer
         static Config config;
         Layout layout;
 
+        // State Flags
         bool yaraExecuted = false;  
         bool yaraGetRulesFiles = false;
         bool isButtonFindPressed    = false;
+
+        // Data Storage
         std::vector<LineInfo> yaraLines;
-
         std::vector<size_t> visibleIndices;
-
         std::string lastSearchText;
 
+        // Search & Highlight Logic
         bool searchActive            = false;
-        size_t searchResultRealIndex = 0; // Indexul real din yaraLines (nu cel vizual!)
-        uint32 searchResultStartCol  = 0; // Coloana vizuală de start
+        size_t searchResultRealIndex = 0; 
+        uint32 searchResultStartCol  = 0; 
         uint32 searchResultLen       = 0;
 
      public:
+
+        // Viewport & Cursor
         uint32 startViewLine;
         uint32 leftViewCol;
         uint32 cursorRow;
         uint32 cursorCol;
 
+        // Selection (Mouse/Keyboard)
         bool selectionActive;
         uint32 selectionAnchorRow;
         uint32 selectionAnchorCol;
 
-        
-
+        // Constructor
         Instance(Reference<GView::Object> _obj, Settings* _settings);
 
+        // --- Metode ViewControl (Interfața Standard) ---
         bool GetPropertyValue(uint32 propertyID, PropertyValue& value) override;
         bool SetPropertyValue(uint32 propertyID, const PropertyValue& value, String& error) override;
         void SetCustomPropertyValue(uint32 propertyID) override;
         bool IsPropertyValueReadOnly(uint32 propertyID) override;
         const vector<Property> GetPropertiesList() override;
+
         bool GoTo(uint64 offset) override;
         bool Select(uint64 offset, uint64 size) override;
+
+        // --- Dialoguri ---
         bool ShowGoToDialog() override;
         bool ShowFindDialog() override;
         bool ShowCopyDialog() override;
+
+        // --- Desenare & UI ---
         void PaintCursorInformation(AppCUI::Graphics::Renderer& renderer, uint32 width, uint32 height) override;
+        void Paint(Graphics::Renderer& renderer) override;
+        void OnAfterResize(int newWidth, int newHeight) override;
+
+        // --- Serializare Setări ---
         std::string_view GetCategoryNameForSerialization() const override;
         bool AddCategoryBeforePropertyNameWhenSerializing() const override;
-        void Paint(Graphics::Renderer& renderer) override;
+        
+        // --- Input Handling ---
         bool OnUpdateCommandBar(Application::CommandBar& commandBar) override;
         bool UpdateKeys(KeyboardControlsInterface* interfaceParam) override;
         bool OnEvent(Reference<Control>, Event eventType, int ID) override;
-        void OnAfterResize(int newWidth, int newHeight) override;
         bool OnKeyEvent(AppCUI::Input::Key keyCode, char16 characterCode) override;
-        void MoveTo();
+
+        // --- Mouse Handling ---
         bool OnMouseWheel(int x, int y, AppCUI::Input::MouseWheel direction, AppCUI::Input::Key key) override;
         bool OnMouseDrag(int x, int y, Input::MouseButton button, Input::Key keyCode) override;
         void OnMousePressed(int x, int y, Input::MouseButton button, Input::Key keyCode) override;
-        void CopySelectionToClipboard();
+
+        // --- Internal Logic Methods ---
+        void MoveTo();
         void ComputeMouseCoords(int x, int y, uint32 startViewLine, uint32 leftViewCol, const std::vector<LineInfo>& lines, uint32& outRow, uint32& outCol);
 
         void RunYara();  
         void GetRulesFiles();
+        void ExportResults();
 
+        // Selection & Folding
         void ToggleSelection();
         void SelectAllRules();   
         void DeselectAllRules(); 
-
         void UpdateVisibleIndices();   
         void ToggleFold(size_t index); 
-        
+        void CopySelectionToClipboard();
+
+        // Search Helpers
         void SelectMatch(uint32 row, size_t startRawCol, uint32 length);
         bool FindNext();
 
-        void ExportResults();
-
+        // Hex Processing
         std::vector<std::string> ExtractHexContextFromYaraMatch(const std::string& yaraLine, const std::string& exePath, size_t contextSize = 64);
         std::string GetSectionFromOffset(const std::string& exePath, uint64_t offset);
-
     };
-
 
     class FindDialog : public AppCUI::Controls::Window
     {
         Reference<AppCUI::Controls::TextField> input;
 
-      public:
-        std::string resultText;
+        public:
+            std::string resultText;
 
-        FindDialog() : Window("Find Text", "d:c,w:60,h:8", WindowFlags::ProcessReturn)
-        {
-            // Eticheta
-            AppCUI::Controls::Factory::Label::Create(this, "Search for:", "x:1,y:1,w:56");
+            FindDialog() : Window("Find Text", "d:c,w:60,h:8", WindowFlags::ProcessReturn)
+            {
+                // Eticheta
+                AppCUI::Controls::Factory::Label::Create(this, "Search for:", "x:1,y:1,w:56");
 
-            // Câmpul de text
-            input = AppCUI::Controls::Factory::TextField::Create(this, "", "x:1,y:2,w:56");
-            input->SetHotKey('S'); // Alt+S sare aici
+                // Câmpul de text
+                input = AppCUI::Controls::Factory::TextField::Create(this, "", "x:1,y:2,w:56");
+                input->SetHotKey('S'); // Alt+S sare aici
+                input->SetFocus();
 
-            input->SetFocus();
-            // Butoanele
-            AppCUI::Controls::Factory::Button::Create(this, "&Find", "l:16,b:0,w:13", 100);
-            AppCUI::Controls::Factory::Button::Create(this, "&Cancel", "l:31,b:0,w:13", 101);
-        }
-
-        bool OnEvent(Reference<Control> sender, Event eventType, int controlID) override
-        {
-            if (eventType == Event::ButtonClicked || eventType == Event::WindowAccept) {
-                if ((eventType == Event::ButtonClicked && controlID == 100) || eventType == Event::WindowAccept) {
-                    resultText = std::string(input->GetText());
-                    Exit(Dialogs::Result::Ok);
-                    return true;
-                }
-                if (controlID == 101) // ID-ul butonului Cancel
-                {
-                    Exit(Dialogs::Result::Cancel);
-                    return true;
-                }
+                // Butoanele
+                AppCUI::Controls::Factory::Button::Create(this, "&Find", "l:16,b:0,w:13", 100);
+                AppCUI::Controls::Factory::Button::Create(this, "&Cancel", "l:31,b:0,w:13", 101);
             }
-            return Window::OnEvent(sender, eventType, controlID);
-        }
+
+            bool OnEvent(Reference<Control> sender, Event eventType, int controlID) override
+            {
+                if (eventType == Event::ButtonClicked || eventType == Event::WindowAccept) {
+                    if ((eventType == Event::ButtonClicked && controlID == 100) || eventType == Event::WindowAccept) {
+                        resultText = std::string(input->GetText());
+                        Exit(Dialogs::Result::Ok);
+                        return true;
+                    }
+                    if (controlID == 101) 
+                    {
+                        Exit(Dialogs::Result::Cancel);
+                        return true;
+                    }
+                }
+                return Window::OnEvent(sender, eventType, controlID);
+            }
     };
 
 }; // namespace GView
