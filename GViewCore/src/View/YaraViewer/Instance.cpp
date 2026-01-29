@@ -1238,14 +1238,14 @@ void Instance::RunYara()
 
                     auto ctx = ExtractHexContextFromYaraMatch(s, currentFile.string());
                     for (auto& ctxLine : ctx)
-                        yaraLines.push_back({ "                " + ctxLine, LineType::Normal });
+                        yaraLines.push_back({ "           " + ctxLine, LineType::Normal });
 
 
                     // 2️⃣ Disassembly
                     // Folosim aceeași extragere de offset din linia YARA
                     auto disasmLines = ExtractDisassemblyFromYaraMatch(s, currentFile.string()); // context 32 bytes înainte și după
                     for (auto& disLine : disasmLines)
-                        yaraLines.push_back({ "                " + disLine, LineType::Normal });
+                        yaraLines.push_back({ "           " + disLine, LineType::Normal });
 
                 }
                 yaraLines.push_back({ "", LineType::Normal });
@@ -1376,6 +1376,15 @@ std::vector<std::string> Instance::ExtractDisassemblyFromYaraMatch(
         return output;
     }
 
+    //sectiune valida = ".text"
+    std::string section = GetSectionFromOffset(exePath, offset);
+
+    if (section != ".text") {
+        output.push_back("Disassembly: (skipped – non-executable section)");
+        return output;
+    }
+
+
     // 2️⃣ Deschidem fișierul
     std::ifstream file(exePath, std::ios::binary);
     if (!file.is_open()) {
@@ -1430,32 +1439,58 @@ std::string Instance::GetSectionFromOffset(const std::string& exePath, uint64_t 
     if (!file)
         return "UNKNOWN";
 
+    // 1️⃣ DOS Header
     IMAGE_DOS_HEADER dos{};
     file.read(reinterpret_cast<char*>(&dos), sizeof(dos));
-
     if (dos.e_magic != IMAGE_DOS_SIGNATURE)
         return "NOT_A_PE";
 
+    // 2️⃣ NT Headers
     file.seekg(dos.e_lfanew, std::ios::beg);
+    DWORD signature = 0;
+    file.read(reinterpret_cast<char*>(&signature), sizeof(signature));
+    if (signature != IMAGE_NT_SIGNATURE)
+        return "NOT_A_PE";
 
-    IMAGE_NT_HEADERS nt{};
-    file.read(reinterpret_cast<char*>(&nt), sizeof(nt));
+    IMAGE_FILE_HEADER fileHeader{};
+    file.read(reinterpret_cast<char*>(&fileHeader), sizeof(fileHeader));
 
-    IMAGE_SECTION_HEADER section{};
+    // 3️⃣ Detect 32-bit vs 64-bit
+    IMAGE_OPTIONAL_HEADER32 optional32{};
+    IMAGE_OPTIONAL_HEADER64 optional64{};
+    bool is64 = false;
+    WORD magic;
+    file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    file.seekg(-static_cast<int>(sizeof(magic)), std::ios::cur);
 
-    for (int i = 0; i < nt.FileHeader.NumberOfSections; i++) {
-        file.read(reinterpret_cast<char*>(&section), sizeof(section));
+    if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+        file.read(reinterpret_cast<char*>(&optional32), sizeof(optional32));
+        is64 = false;
+    } else if (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        file.read(reinterpret_cast<char*>(&optional64), sizeof(optional64));
+        is64 = true;
+    } else {
+        return "UNKNOWN";
+    }
 
-        DWORD start = section.PointerToRawData;
-        DWORD end   = start + section.SizeOfRawData;
+    // 4️⃣ Secțiuni
+    std::vector<IMAGE_SECTION_HEADER> sections(fileHeader.NumberOfSections);
+    for (int i = 0; i < fileHeader.NumberOfSections; i++) {
+        file.read(reinterpret_cast<char*>(&sections[i]), sizeof(IMAGE_SECTION_HEADER));
+    }
 
+    // 5️⃣ Căutăm secțiunea pentru offset
+    for (const auto& sec : sections) {
+        DWORD start = sec.PointerToRawData;
+        DWORD end   = start + sec.SizeOfRawData;
         if (offset >= start && offset < end) {
-            return std::string(reinterpret_cast<char*>(section.Name), strnlen(reinterpret_cast<char*>(section.Name), 8));
+            return std::string(reinterpret_cast<const char*>(sec.Name), strnlen(reinterpret_cast<const char*>(sec.Name), 8));
         }
     }
 
     return "UNKNOWN";
 }
+
 
 void Instance::ExportResults()
 {

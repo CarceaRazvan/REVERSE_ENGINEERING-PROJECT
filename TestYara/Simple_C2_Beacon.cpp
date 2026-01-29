@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-int main()
+int endpoint()
 {
     // Simulated C2 endpoint (educational)
     const std::string c2_url     = "https://example-not-real-c2.com/api";
