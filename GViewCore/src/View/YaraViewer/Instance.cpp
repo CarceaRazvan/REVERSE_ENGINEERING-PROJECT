@@ -110,6 +110,9 @@ bool Instance::ShowFindDialog()
 
     this->lastSearchText = text;
 
+    this->isButtonFindPressed = true;
+    this->SetFocus();
+
     // --- PREGĂTIRE CASE-INSENSITIVE ---
     // Facem o copie a textului de căutat și îl transformăm în litere mici
     std::string textToFindLower = text;
@@ -153,38 +156,15 @@ bool Instance::ShowFindDialog()
             // B. Calculăm coordonatele VIZUALE și activăm SELECȚIA
             for (size_t v = 0; v < visibleIndices.size(); v++) {
                 if (visibleIndices[v] == currentIdx) {
-                    // 1. Calculăm coloana de start (visual col)
-                    size_t startCol = foundPos;
-
-                    // Adăugăm offset-ul prefixelor vizuale
-                    if (line.type == LineType::FileHeader)
-                        startCol += 4; // "[ ] "
-                    else if (line.indentLevel > 0)
-                        startCol += 4; // "    "
-
-                    // 2. Setăm ANCORA la începutul cuvântului
-                    this->selectionAnchorRow = (uint32) v;
-                    this->selectionAnchorCol = (uint32) startCol;
-
-                    // 3. Setăm CURSORUL la sfârșitul cuvântului
-                    // Folosim textToFind.length() pentru că lungimea e aceeași indiferent de case
-                    this->cursorRow = (uint32) v;
-                    this->cursorCol = (uint32) (startCol + textToFindLower.length());
-
-                    // 4. Activăm selecția
-                    this->selectionActive = true;
-
-                    // 5. Scroll la cursor
-                    MoveTo();
+                    SelectMatch((uint32) v, foundPos, (uint32) textToFindLower.length());
                     return true;
                 }
             }
         }
     }
 
-    if (!FindNext()) {
         AppCUI::Dialogs::MessageBox::ShowError("Not Found", "Text '" + text + "' not found!");
-    }
+    
     return true;
 }
 
@@ -498,23 +478,34 @@ void Instance::Paint(Graphics::Renderer& renderer)
 
 bool Instance::OnUpdateCommandBar(Application::CommandBar& commandBar)
 {
-    commandBar.SetCommand(Commands::SomeCommand.Key, Commands::SomeCommand.Caption, Commands::SomeCommand.CommandId);
-    commandBar.SetCommand(Commands::SomeCommandViewRules.Key, Commands::SomeCommandViewRules.Caption, Commands::SomeCommandViewRules.CommandId);
+    if (!yaraExecuted) {
+        commandBar.SetCommand(Commands::YaraRunCommand.Key, Commands::YaraRunCommand.Caption, Commands::YaraRunCommand.CommandId);
+    }
+    commandBar.SetCommand(Commands::ViewRulesCommand.Key, Commands::ViewRulesCommand.Caption, Commands::ViewRulesCommand.CommandId);
     commandBar.SetCommand(Commands::EditRulesCommand.Key, Commands::EditRulesCommand.Caption, Commands::EditRulesCommand.CommandId);
-    commandBar.SetCommand(Commands::SelectAllCommand.Key, "SelectAll", Commands::SelectAllCommand.CommandId);
-    commandBar.SetCommand(Commands::DeselectAllCommand.Key, "DeselectAll", Commands::DeselectAllCommand.CommandId);
-    commandBar.SetCommand(Commands::FindNextCommand.Key, "Find Next", Commands::FindNextCommand.CommandId);
+    commandBar.SetCommand(Commands::SelectAllCommand.Key, "Select All", Commands::SelectAllCommand.CommandId);
+    commandBar.SetCommand(Commands::DeselectAllCommand.Key, "Deselect All", Commands::DeselectAllCommand.CommandId);
+    commandBar.SetCommand(Commands::FindTextCommand.Key, "Find Text", Commands::FindTextCommand.CommandId);
+
+    if (isButtonFindPressed) {
+        commandBar.SetCommand(Commands::FindNextCommand.Key, "Find Next", Commands::FindNextCommand.CommandId);
+    }
+    if (yaraExecuted) {
+        commandBar.SetCommand(Commands::SaveReportCommand.Key, "Save Report", Commands::SaveReportCommand.CommandId);
+    }
     return false;
 }
 
 bool Instance::UpdateKeys(KeyboardControlsInterface* interfaceParam)
 {
-    interfaceParam->RegisterKey(&Commands::SomeCommand);
-    interfaceParam->RegisterKey(&Commands::SomeCommandViewRules);
+    interfaceParam->RegisterKey(&Commands::YaraRunCommand);
+    interfaceParam->RegisterKey(&Commands::ViewRulesCommand);
     interfaceParam->RegisterKey(&Commands::EditRulesCommand);
     interfaceParam->RegisterKey(&Commands::SelectAllCommand);
     interfaceParam->RegisterKey(&Commands::DeselectAllCommand);
+    interfaceParam->RegisterKey(&Commands::FindTextCommand);
     interfaceParam->RegisterKey(&Commands::FindNextCommand);
+    interfaceParam->RegisterKey(&Commands::SaveReportCommand);
 
     return true;
 }
@@ -524,7 +515,9 @@ bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
     if (eventType != Event::Command)
         return false;
 
-    if (ID == Commands::SomeCommand.CommandId) {
+
+
+    if (ID == Commands::YaraRunCommand.CommandId) {
         auto result = AppCUI::Dialogs::MessageBox::ShowOkCancel("Run Yara", "Are you sure?");
 
 
@@ -534,8 +527,9 @@ bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
             RunYara();
         }
 
-    } else if (ID == Commands::SomeCommandViewRules.CommandId) {
+    } else if (ID == Commands::ViewRulesCommand.CommandId) {
         yaraGetRulesFiles = false;
+        yaraExecuted      = false;
         GetRulesFiles();
 
     } else if (ID == Commands::EditRulesCommand.CommandId) {
@@ -571,6 +565,12 @@ bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
         return true;
     } else if (ID == Commands::FindNextCommand.CommandId) {
         FindNext();
+        return true;
+    } else if (ID == Commands::SaveReportCommand.CommandId) {
+        ExportResults();
+        return true;
+    } else if (ID == Commands::FindTextCommand.CommandId) {
+        ShowFindDialog();
         return true;
     }
 
@@ -617,6 +617,8 @@ bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
     if (keyCode == Key::Escape) {
         this->selectionActive = false; 
         this->searchActive    = false; 
+        this->isButtonFindPressed = false;
+        this->SetFocus();
         this->lastSearchText.clear();  
         return true;
     }
@@ -1378,4 +1380,64 @@ std::string Instance::GetSectionFromOffset(const std::string& exePath, uint64_t 
     }
 
     return "UNKNOWN";
+}
+
+void Instance::ExportResults()
+{
+    // 1. Verificăm dacă avem ce salva
+    if (yaraLines.empty()) {
+        AppCUI::Dialogs::MessageBox::ShowError("Error", "No scan results to save!");
+        return;
+    }
+
+    // 2. ÎNTREBAREA DE CONFIRMARE (Acesta este pasul cerut)
+    auto response = AppCUI::Dialogs::MessageBox::ShowOkCancel("Save Report", "Do you want to save the scan results to a text file?");
+
+    if (response != Dialogs::Result::Ok) {
+        return; // Dacă userul dă Cancel sau X, ieșim și nu salvăm nimic.
+    }
+
+    // 3. Generăm numele cu data curentă
+    auto now       = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H-%M-%S");
+    std::string fileName = "results_" + ss.str() + ".txt";
+
+    // 4. Pregătim calea: root/3rdPartyLibs/results/
+    fs::path currentPath = fs::current_path();
+    fs::path rootPath    = currentPath.parent_path().parent_path();
+    fs::path resultsDir  = rootPath / "3rdPartyLibs" / "results";
+
+    if (!fs::exists(resultsDir)) {
+        fs::create_directories(resultsDir);
+    }
+
+    fs::path fullPath = resultsDir / fileName;
+
+    // 5. Scrierea efectivă
+    std::ofstream out(fullPath);
+    if (!out.is_open()) {
+        AppCUI::Dialogs::MessageBox::ShowError("Error", "Could not create file!");
+        return;
+    }
+
+    for (const auto& line : yaraLines) {
+        // Păstrăm indentarea
+        for (int i = 0; i < line.indentLevel; i++)
+            out << "\t";
+
+        // Păstrăm checkbox-ul vizual
+        if (line.type == LineType::FileHeader) {
+            out << (line.isChecked ? "[x] " : "[ ] ");
+        }
+
+        out << line.text << "\n";
+    }
+    out.close();
+
+    // 6. Notificare finală și deschidere folder
+    AppCUI::Dialogs::MessageBox::ShowNotification("Saved", "Report saved successfully!\nOpening folder...");
+    ShellExecuteA(NULL, "explore", resultsDir.string().c_str(), NULL, NULL, SW_SHOWNORMAL);
 }
