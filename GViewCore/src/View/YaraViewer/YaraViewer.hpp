@@ -54,7 +54,8 @@ namespace GView::View::YaraViewer
         FileHeader,  // Conține checkbox [ ] sau [x] și numele fișierului
         RuleContent, // Conținutul regulii (poate fi colorat diferit)
         Info,        // Mesaje informative (galben/albastru)
-        Match        // Linii care indică o potrivire (MATCH)
+        Match,       // Linii care indică o potrivire (MATCH)
+        OffsetHeader  // Header pentru offset-uri și context hex/disasm
     };
 
     struct LineInfo {
@@ -164,12 +165,11 @@ namespace GView::View::YaraViewer
         bool FindNext();
 
         // Hex Processing
-        std::vector<std::string> ExtractHexContextFromYaraMatch(const std::string& yaraLine, const std::string& exePath, size_t contextSize = 64);
-        std::vector<std::string> ExtractDisassemblyFromYaraMatch(
-              const std::string& yaraLine,
-              const std::string& exePath,
-              size_t contextSize = 32// bytes after offset
-        );
+        std::vector<std::pair<std::string, LineType>> ExtractHexContextFromYaraMatch(
+              const std::string& yaraLine, const std::string& exePath, size_t contextSize = 64);
+        std::vector<std::pair<std::string, LineType>> ExtractDisassemblyFromYaraMatch(
+              const std::string& yaraLine, const std::string& exePath, size_t contextSize = 32);
+
         std::string GetSectionFromOffset(const std::string& exePath, uint64_t offset);
     };
 

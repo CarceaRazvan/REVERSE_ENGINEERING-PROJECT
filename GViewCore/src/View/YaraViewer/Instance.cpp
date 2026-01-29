@@ -371,6 +371,15 @@ void Instance::Paint(Graphics::Renderer& renderer)
             displayText.insert(0, "    ");
         }
 
+        int splitColorIndex = -1; // Unde începe culoarea roșie
+        if (info.type == LineType::OffsetHeader) {
+            // Căutăm "0x" în textul final (care include indentarea)
+            size_t pos = displayText.find("0x");
+            if (pos != std::string::npos) {
+                splitColorIndex = (int) pos;
+            }
+        }
+
         renderer.WriteSpecialCharacter(LEFT_MARGIN - 1, tr, SpecialChars::BoxVerticalSingleLine, marginColor);
         if (visualIndex == this->cursorRow) {
             renderer.WriteSingleLineText(1, tr, "->", arrowColor);
@@ -387,22 +396,26 @@ void Instance::Paint(Graphics::Renderer& renderer)
                 uint32 absCol          = this->leftViewCol + i;
                 ColorPair currentColor = textNormal;
 
-                if (info.type == LineType::RuleContent)
+                if (info.type == LineType::OffsetHeader) {
+                    if (splitColorIndex != -1 && absCol >= splitColorIndex) {
+                        currentColor = ruleBlockColor; // VERDE (de la "0x" încolo)
+                    } else {
+                        currentColor = textNormal; // ALB (partea cu "File offset: ")
+                    }
+                } else if (info.type == LineType::RuleContent)
                     currentColor = ruleBlockColor;
                 else if (info.type == LineType::Info)
                     currentColor = infoColor;
                 else if (info.type == LineType::Match)
                     currentColor = matchColor;
                 else if (info.type == LineType::FileHeader) {
-                    if (absCol >= checkboxStart && absCol < checkboxEnd) {
-                        currentColor = checkboxColor; // [x]
-                    }
-                    // AICI E CORECTAT: Dacă arrowStart e valid și suntem după el
-                    else if (arrowStart != -1 && absCol >= arrowStart) {
-                        currentColor = foldColor; // > sau v
-                    } else {
-                        currentColor = headerColor; // Nume fișier
-                    }
+                    // ... logica ta existentă pentru checkbox ...
+                    if (absCol >= checkboxStart && absCol < checkboxEnd)
+                        currentColor = checkboxColor;
+                    else if (arrowStart != -1 && absCol >= arrowStart)
+                        currentColor = foldColor;
+                    else
+                        currentColor = headerColor;
                 }
 
                 if (this->searchActive && realIndex == this->searchResultRealIndex) {
@@ -1162,15 +1175,39 @@ void Instance::RunYara()
 
                             // Apelează funcția ta de extragere
                             auto ctx = ExtractHexContextFromYaraMatch(s, currentFile.string());
-                            for (auto& ctxLine : ctx)
-                                yaraLines.push_back({ "                " + ctxLine, LineType::Normal });
+                            for (auto& ctxPair : ctx) {
+                                LineInfo infoLine;
+
+                                std::string prefix = "           ";
+
+                                if (ctxPair.first.find("0x") == 0) {
+                                    prefix += "    "; 
+                                }
+
+                                infoLine.text = prefix + ctxPair.first;
+                                infoLine.type = ctxPair.second;
+
+                                yaraLines.push_back(infoLine);
+                            }
 
 
-                            // 2️⃣ Disassembly
-                            // Folosim aceeași extragere de offset din linia YARA
+                            // 2 Disassembly
                             auto disasmLines = ExtractDisassemblyFromYaraMatch(s, currentFile.string()); // context 32 bytes înainte și după
-                            for (auto& disLine : disasmLines)
-                                yaraLines.push_back({ "                " + disLine, LineType::Normal });
+                            for (auto& disPair : disasmLines) {
+
+                                LineInfo infoLine;
+                                if (disPair.first.find("Disassembly:") != std::string::npos) {
+                                    // Titlul îl punem mai în stânga (indentare mai mică)
+                                    infoLine.text = "           " + disPair.first;
+                                } else {
+                                    // Instrucțiunile le punem mai în dreapta (indentare mare)
+                                    infoLine.text = "               " + disPair.first;
+                                }
+
+                                infoLine.type = disPair.second;
+
+                                yaraLines.push_back(infoLine);
+                            }
 
 
                         }
@@ -1237,15 +1274,43 @@ void Instance::RunYara()
                     yaraLines.push_back({ "        At:", LineType::Normal });
 
                     auto ctx = ExtractHexContextFromYaraMatch(s, currentFile.string());
-                    for (auto& ctxLine : ctx)
-                        yaraLines.push_back({ "           " + ctxLine, LineType::Normal });
+                    for (auto& ctxPair : ctx) {
+                        LineInfo infoLine;
+                        std::string prefix = "           ";
+
+                        if (ctxPair.first.find("0x") == 0) {
+                            prefix += "    "; 
+                        }
+
+                        infoLine.text = prefix + ctxPair.first;
+                        infoLine.type = ctxPair.second;
+
+                        yaraLines.push_back(infoLine);
+                    }
 
 
                     // 2️⃣ Disassembly
                     // Folosim aceeași extragere de offset din linia YARA
-                    auto disasmLines = ExtractDisassemblyFromYaraMatch(s, currentFile.string()); // context 32 bytes înainte și după
-                    for (auto& disLine : disasmLines)
-                        yaraLines.push_back({ "           " + disLine, LineType::Normal });
+                    auto disasmLines = ExtractDisassemblyFromYaraMatch(s, currentFile.string());
+                    for (auto& disPair : disasmLines) {
+                        // disPair.first  = textul instrucțiunii
+                        // disPair.second = tipul (Culoarea)
+
+                        LineInfo infoLine;
+                        // Adăugăm indentare doar dacă nu e titlul "Disassembly:" (opțional, estetic)
+                        if (disPair.first.find("Disassembly:") != std::string::npos) {
+                            // Titlul îl punem mai în stânga (indentare mai mică)
+                            infoLine.text = "           " + disPair.first;
+                        } else {
+                            // Instrucțiunile le punem mai în dreapta (indentare mare)
+                            infoLine.text = "               " + disPair.first;
+                        }
+
+                        // Setăm culoarea returnată de funcție
+                        infoLine.type = disPair.second;
+
+                        yaraLines.push_back(infoLine);
+                    }
 
                 }
                 yaraLines.push_back({ "", LineType::Normal });
@@ -1276,15 +1341,14 @@ void Instance::RunYara()
 }
 
 
-std::vector<std::string> Instance::ExtractHexContextFromYaraMatch(
-      const std::string& yaraLine,
-      const std::string& exePath,
-      size_t contextSize // bytes before & after
-    )
+// --- MODIFICARE: Adăugăm namespace-ul complet în tipul returnat ---
+std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance::ExtractHexContextFromYaraMatch(
+      const std::string& yaraLine, const std::string& exePath, size_t contextSize)
 {
-    std::vector<std::string> output;
+    // Folosim namespace-ul complet și aici pentru siguranță
+    std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> output;
 
-    // 1️ Extragem offset-ul (0x....)
+    // 1. Extragem offset-ul (0x....)
     size_t pos = yaraLine.find(':');
     if (pos == std::string::npos)
         return output;
@@ -1294,18 +1358,18 @@ std::vector<std::string> Instance::ExtractHexContextFromYaraMatch(
     try {
         offset = std::stoull(offsetStr, nullptr, 16);
     } catch (...) {
-        output.push_back("EROARE: Offset invalid în linia YARA.");
+        output.push_back({ "EROARE: Offset invalid în linia YARA.", LineType::Normal });
         return output;
     }
 
-    // 2️ Deschidem fișierul EXE
+    // 2. Deschidem fișierul EXE
     std::ifstream file(exePath, std::ios::binary);
     if (!file.is_open()) {
-        output.push_back("EROARE: Nu pot deschide fișierul.");
+        output.push_back({ "EROARE: Nu pot deschide fișierul.", LineType::Normal });
         return output;
     }
 
-    // 3️ Calculăm zona de citire
+    // 3. Calculăm zona de citire
     uint64_t startOffset = (offset > contextSize) ? offset - contextSize : 0;
     size_t readSize      = contextSize * 2;
 
@@ -1315,54 +1379,76 @@ std::vector<std::string> Instance::ExtractHexContextFromYaraMatch(
     file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
     size_t bytesRead = file.gcount();
 
-    // 4 Format HEX + ASCII (16 bytes pe linie)
+    // 4. Format HEX + ASCII
     size_t lineSize = 16;
     for (size_t i = 0; i < bytesRead; i += lineSize) {
         std::ostringstream line;
         std::ostringstream ascii;
 
-        // hex și ascii
+        // Construim conținutul liniei (Hex + ASCII)
         for (size_t j = 0; j < lineSize; j++) {
             if (i + j < bytesRead) {
                 uint8_t b = buffer[i + j];
                 line << std::setw(2) << std::setfill('0') << std::hex << std::uppercase << static_cast<int>(b) << ' ';
                 ascii << (std::isprint(b) ? static_cast<char>(b) : '.');
             } else {
-                line << "   "; // padding pentru ultima linie
+                line << "   ";
             }
         }
 
+        // Construim linia completă
         std::ostringstream fullLine;
-        fullLine << "0x" << std::setw(8) << std::setfill('0') << std::hex << (startOffset + i) << "  " << line.str() << " " << ascii.str();
+        uint64_t currentLineAddr = startOffset + i;
 
-        output.push_back(fullLine.str());
+        fullLine << "0x" << std::setw(8) << std::setfill('0') << std::hex << currentLineAddr << "  " << line.str() << " " << ascii.str();
+
+        // --- AICI ESTE MODIFICAREA PENTRU VERDE ---
+
+        // Implicit linia este Albă (Normal)
+        GView::View::YaraViewer::LineType currentType = GView::View::YaraViewer::LineType::Normal;
+
+        // Verificăm dacă offset-ul căutat (cel din Yara match) se află pe această linie
+        // Offset-ul trebuie să fie >= începutul liniei ȘI < începutul liniei următoare
+        if (offset >= currentLineAddr && offset < (currentLineAddr + lineSize)) {
+            currentType = GView::View::YaraViewer::LineType::RuleContent; // RuleContent este VERDE în Paint()
+        }
+
+        // Adăugăm linia cu tipul calculat
+        output.push_back({ fullLine.str(), currentType });
     }
 
-    // 5️ Header cu offset original
+    // 5. Header-ul cu offset (ACESTA VA FI ROȘU)
     std::ostringstream header;
     header << "File offset: 0x" << std::hex << std::uppercase << offset;
-
 
     std::ostringstream section;
     std::string sectionName = GetSectionFromOffset(exePath, offset);
     section << "Section: " << sectionName;
 
-    output.insert(output.begin(), "Hex Dump:");
-    output.insert(output.begin(), header.str());
-    output.insert(output.begin(), section.str());
+    // --- INSERĂM LINIILE COLORATE ---
+
+    // Titlu (Alb)
+    output.insert(output.begin(), { "Hex Dump:", LineType::Normal });
+
+    // Offset (Verde - folosind LineType::Info)
+    output.insert(output.begin() + 1, { header.str(), LineType::OffsetHeader }); 
+    // Secțiune (Alb sau Roșu, cum preferi - aici e Normal)
+    output.insert(output.begin() + 2, { section.str(), LineType::Normal });
+
     return output;
 }
 
 
-std::vector<std::string> Instance::ExtractDisassemblyFromYaraMatch(
+std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance::ExtractDisassemblyFromYaraMatch(
       const std::string& yaraLine,
       const std::string& exePath,
-      size_t contextSize // total bytes pentru disassembly (ex. 32)
+      size_t contextSize // total bytes pentru disassembly
 )
 {
-    std::vector<std::string> output;
+    // Returnăm perechi (Text, Culoare)
+    std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> output;
 
-    // 1️⃣ Extragem offset-ul din linia YARA
+    // 1. Extragem offset-ul din linia YARA
     size_t pos = yaraLine.find(':');
     if (pos == std::string::npos)
         return output;
@@ -1372,27 +1458,25 @@ std::vector<std::string> Instance::ExtractDisassemblyFromYaraMatch(
     try {
         offset = std::stoull(offsetStr, nullptr, 16);
     } catch (...) {
-        output.push_back("EROARE: Offset invalid");
+        output.push_back({ "EROARE: Offset invalid", LineType::Normal });
         return output;
     }
 
-    //sectiune valida = ".text"
+    // Sectiune valida = ".text"
     std::string section = GetSectionFromOffset(exePath, offset);
-
     if (section != ".text") {
-        output.push_back("Disassembly: (skipped – non-executable section)");
+        output.push_back({ "Disassembly: (skipped – non-executable section)", LineType::Normal });
         return output;
     }
 
-
-    // 2️⃣ Deschidem fișierul
+    // 2. Deschidem fișierul
     std::ifstream file(exePath, std::ios::binary);
     if (!file.is_open()) {
-        output.push_back("EROARE: Nu pot deschide fișierul");
+        output.push_back({ "EROARE: Nu pot deschide fișierul", LineType::Normal });
         return output;
     }
 
-    // 3️⃣ Citim buffer de la offset
+    // 3. Citim buffer de la offset
     file.seekg(offset, std::ios::beg);
     std::vector<uint8_t> buffer(contextSize);
     file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
@@ -1400,30 +1484,41 @@ std::vector<std::string> Instance::ExtractDisassemblyFromYaraMatch(
     buffer.resize(bytesRead);
 
     if (buffer.empty()) {
-        output.push_back("EROARE: Nu am bytes pentru disassembly");
+        output.push_back({ "EROARE: Nu am bytes pentru disassembly", LineType::Normal });
         return output;
     }
 
-    // 4️⃣ Capstone disassembly
+    // 4. Capstone disassembly
     csh handle;
     if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK) {
-        output.push_back("EROARE: Capstone init failed");
+        output.push_back({ "EROARE: Capstone init failed", LineType::Normal });
         return output;
     }
     cs_option(handle, CS_OPT_DETAIL, CS_OPT_OFF);
 
     cs_insn* insn;
+    // Dezasamblăm bufferul, considerând că începe la adresa 'offset'
     size_t count = cs_disasm(handle, buffer.data(), buffer.size(), offset, 0, &insn);
 
     if (count > 0) {
-        output.push_back("Disassembly:");
+        output.push_back({ "Disassembly:", LineType::Normal });
+
         for (size_t i = 0; i < count; i++) {
             std::ostringstream line;
             line << "0x" << std::setw(8) << std::setfill('0') << std::hex << insn[i].address << " " << insn[i].mnemonic << " " << insn[i].op_str;
-            output.push_back(line.str());
+
+            // --- AICI ESTE LOGICA DE COLORARE ---
+            GView::View::YaraViewer::LineType lineType = GView::View::YaraViewer::LineType::Normal;
+
+            // Dacă adresa instrucțiunii este exact offset-ul căutat -> VERDE (RuleContent)
+            if (insn[i].address == offset) {
+                lineType = GView::View::YaraViewer::LineType::RuleContent;
+            }
+
+            output.push_back({ line.str(), lineType });
         }
     } else {
-        output.push_back("EROARE: Nu s-a putut disassembly");
+        output.push_back({ "EROARE: Nu s-a putut disassembly", LineType::Normal });
     }
 
     cs_free(insn, count);
