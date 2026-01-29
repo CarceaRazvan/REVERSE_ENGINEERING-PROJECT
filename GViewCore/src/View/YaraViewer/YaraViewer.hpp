@@ -143,14 +143,8 @@ namespace GView::View::YaraViewer
         bool OnMouseWheel(int x, int y, AppCUI::Input::MouseWheel direction, AppCUI::Input::Key key) override;
         bool OnMouseDrag(int x, int y, Input::MouseButton button, Input::Key keyCode) override;
         void OnMousePressed(int x, int y, Input::MouseButton button, Input::Key keyCode) override;
-
-        // --- Internal Logic Methods ---
-        void MoveTo();
         void ComputeMouseCoords(int x, int y, uint32 startViewLine, uint32 leftViewCol, const std::vector<LineInfo>& lines, uint32& outRow, uint32& outCol);
-
-        void RunYara();  
-        void GetRulesFiles();
-        void ExportResults();
+        void MoveTo();
 
         // Selection & Folding
         void ToggleSelection();
@@ -164,9 +158,16 @@ namespace GView::View::YaraViewer
         void SelectMatch(uint32 row, size_t startRawCol, uint32 length);
         bool FindNext();
 
-        // Hex Processing
+        // --- Internal Logic Methods ---
+        void RunYara();
+        void GetRulesFiles();
+        void ExportResults();
+
+           // Hex Processing
         std::vector<std::pair<std::string, LineType>> ExtractHexContextFromYaraMatch(
               const std::string& yaraLine, const std::string& exePath, size_t contextSize = 64);
+
+           // Disassembly
         std::vector<std::pair<std::string, LineType>> ExtractDisassemblyFromYaraMatch(
               const std::string& yaraLine, const std::string& exePath, size_t contextSize = 32);
 

@@ -21,6 +21,8 @@ Config Instance::config;
 
 constexpr int startingX = 5;
 
+
+// Constructor
 Instance::Instance(Reference<GView::Object> _obj, Settings* _settings)
     : ViewControl("Yara View", UserControlFlags::ShowVerticalScrollBar | UserControlFlags::ScrollBarOutsideControl), settings(nullptr)
 {
@@ -56,50 +58,18 @@ Instance::Instance(Reference<GView::Object> _obj, Settings* _settings)
 }
 
 
-bool Instance::GetPropertyValue(uint32 propertyID, PropertyValue& value)
-{
-    NOT_IMPLEMENTED(false)
-}
-bool Instance::SetPropertyValue(uint32 propertyID, const PropertyValue& value, String& error)
-{
-    NOT_IMPLEMENTED(false)
-}
-void Instance::SetCustomPropertyValue(uint32 propertyID)
-{
-}
-bool Instance::IsPropertyValueReadOnly(uint32 propertyID)
-{
-    NOT_IMPLEMENTED(false)
-}
-const vector<Property> Instance::GetPropertiesList()
-{
-    return {};
-}
-bool Instance::GoTo(uint64 offset)
-{
-    NOT_IMPLEMENTED(false)
-}
-bool Instance::Select(uint64 offset, uint64 size)
-{
-    NOT_IMPLEMENTED(false)
-}
-bool Instance::ShowGoToDialog()
-{
-    NOT_IMPLEMENTED(false)
-} 
-std::string_view Instance::GetCategoryNameForSerialization() const
-{
-    return "YaraViewer";
-}
-bool Instance::AddCategoryBeforePropertyNameWhenSerializing() const
-{
-    return true;
-}
-bool Instance::ShowCopyDialog()
-{
-    NOT_IMPLEMENTED(false)
-}
+// --- Metode ViewControl (Interfața Standard) ---
+bool Instance::GetPropertyValue(uint32 propertyID, PropertyValue& value){ NOT_IMPLEMENTED(false) }
+bool Instance::SetPropertyValue(uint32 propertyID, const PropertyValue& value, String& error){ NOT_IMPLEMENTED(false) }
+void Instance::SetCustomPropertyValue(uint32 propertyID){} //NOT IMPLEMENTED
+bool Instance::IsPropertyValueReadOnly(uint32 propertyID){ NOT_IMPLEMENTED(false) }
+const vector<Property> Instance::GetPropertiesList(){ return {}; }
 
+bool Instance::GoTo(uint64 offset){ NOT_IMPLEMENTED(false) }
+bool Instance::Select(uint64 offset, uint64 size) { NOT_IMPLEMENTED(false) }
+
+
+// --- Dialoguri ---
 bool Instance::ShowFindDialog()
 {
     // 1. Instanțiem și afișăm fereastra noastră
@@ -170,122 +140,11 @@ bool Instance::ShowFindDialog()
     
     return true;
 }
-
-bool Instance::FindNext()
-{
-    if (lastSearchText.empty())
-        return false;
-    if (visibleIndices.empty() || yaraLines.empty())
-        return false;
-
-    // 1. Pregătire text (lowercase)
-    std::string textToFindLower = lastSearchText;
-    std::transform(textToFindLower.begin(), textToFindLower.end(), textToFindLower.begin(), ::tolower);
-
-    uint32 totalLines = (uint32) yaraLines.size();
-
-    // --- PASUL CRITIC: Aflăm indexul REAL al liniei curente ---
-    // cursorRow este vizual. Trebuie să luăm indexul real din visibleIndices.
-    uint32 currentRealIndex = 0;
-    if (this->cursorRow < visibleIndices.size()) {
-        currentRealIndex = (uint32) visibleIndices[this->cursorRow];
-    }
-
-    // --- FAZA 1: Căutăm pe restul liniei curente (REALĂ) ---
-    {
-        const auto& line      = yaraLines[currentRealIndex]; // Folosim indexul REAL
-        std::string lineLower = line.text;
-        std::transform(lineLower.begin(), lineLower.end(), lineLower.begin(), ::tolower);
-
-        // Calculăm offset-ul
-        int searchStartOffset = this->cursorCol;
-        if (line.type == LineType::FileHeader)
-            searchStartOffset -= 4; // "[ ] "
-        else if (line.indentLevel > 0)
-            searchStartOffset -= 4; // "    "
-
-        if (searchStartOffset < 0)
-            searchStartOffset = 0;
-
-        // Căutăm
-        size_t foundPos = lineLower.find(textToFindLower, searchStartOffset);
-
-        if (foundPos != std::string::npos) {
-            // Pentru selectare avem nevoie de rândul VIZUAL (care e this->cursorRow)
-            SelectMatch(this->cursorRow, foundPos, (uint32) textToFindLower.length());
-            return true;
-        }
-    }
-
-    // --- FAZA 2: Căutăm pe următoarele linii (folosind indecși REALI) ---
-    // Folosim i <= totalLines pentru a permite wrap-around complet (inclusiv revenirea la linia curentă la început)
-    for (uint32 i = 1; i <= totalLines; i++) {
-        uint32 nextRealIdx = (currentRealIndex + i) % totalLines; // Wrap around pe datele reale
-
-        const auto& line      = yaraLines[nextRealIdx];
-        std::string lineLower = line.text;
-        std::transform(lineLower.begin(), lineLower.end(), lineLower.begin(), ::tolower);
-
-        size_t foundPos = lineLower.find(textToFindLower); // De la 0
-
-        if (foundPos != std::string::npos) {
-            // 1. Expandăm dacă e ascuns
-            if (!line.isVisible) {
-                for (int k = (int) nextRealIdx - 1; k >= 0; k--) {
-                    if (yaraLines[k].type == LineType::FileHeader) {
-                        if (!yaraLines[k].isExpanded)
-                            ToggleFold(k);
-                        break;
-                    }
-                }
-            }
-
-            // 2. Găsim noul index VIZUAL pentru linia reală găsită
-            // (Deoarece ToggleFold a modificat visibleIndices, trebuie să căutăm unde a ajuns linia)
-            for (size_t v = 0; v < visibleIndices.size(); v++) {
-                if (visibleIndices[v] == nextRealIdx) {
-                    SelectMatch((uint32) v, foundPos, (uint32) textToFindLower.length());
-                    return true;
-                }
-            }
-        }
-    }
-
-    AppCUI::Dialogs::MessageBox::ShowNotification("Info", "No more occurrences found.");
-    return false;
-}
-
-// Helper pentru selectare (ca să nu scriem codul de 2 ori)
-void Instance::SelectMatch(uint32 visualRow, size_t startRawCol, uint32 length)
-{
-    // 1. Aflăm indexul REAL
-    size_t realIndex = visibleIndices[visualRow];
-    const auto& line = yaraLines[realIndex];
-
-    // 2. Calculăm coloana vizuală
-    size_t visualCol = startRawCol;
-    if (line.type == LineType::FileHeader)
-        visualCol += 4; // "[ ] "
-    else if (line.indentLevel > 0)
-        visualCol += 4; // "    "
-
-    // 3. SETĂM VARIABILELE DE HIGHLIGHT (NU SELECȚIA)
-    this->searchActive          = true;
-    this->searchResultRealIndex = realIndex; // Reținem linia reală
-    this->searchResultStartCol  = (uint32) visualCol;
-    this->searchResultLen       = length;
-
-    // 4. Mutăm doar cursorul acolo (fără să activăm selecția)
-    this->cursorRow = visualRow;
-    this->cursorCol = (uint32) (visualCol + length);
-
-    // Asigurăm-ne că selecția veche e oprită
-    this->selectionActive = false;
-
-    MoveTo();
-}
+bool Instance::ShowGoToDialog(){ NOT_IMPLEMENTED(false) }
+bool Instance::ShowCopyDialog(){ NOT_IMPLEMENTED(false) }
 
 
+// --- Desenare & UI ---
 void Instance::PaintCursorInformation(AppCUI::Graphics::Renderer& renderer, uint32 width, uint32 height)
 {
     if (height == 0)
@@ -297,8 +156,7 @@ void Instance::PaintCursorInformation(AppCUI::Graphics::Renderer& renderer, uint
 
     renderer.Clear(' ', cfgColor);
     renderer.WriteSingleLineText(1, 0, info.GetText(), cfgColor);
-}
-
+} 
 void Instance::Paint(Graphics::Renderer& renderer)
 {
     ColorPair textNormal    = ColorPair{ Color::White, Color::Transparent };
@@ -348,7 +206,6 @@ void Instance::Paint(Graphics::Renderer& renderer)
         const LineInfo& info = yaraLines[realIndex];
 
         std::string displayText = info.text;
-
 
         int checkboxStart = -1;
         int checkboxEnd   = -1;
@@ -473,10 +330,23 @@ void Instance::Paint(Graphics::Renderer& renderer)
                 }
             }
         }
-       
     }
 }
+void Instance::OnAfterResize(int newWidth, int newHeight)
+{
+    layout.visibleLines = GetHeight();
+    if (layout.visibleLines > 0)
+        layout.visibleLines--;
+    layout.maxCharactersPerLine = GetWidth() - startingX /*left*/ - startingX /*right*/;
+}
 
+
+// --- Serializare Setări ---
+std::string_view Instance::GetCategoryNameForSerialization() const { return "YaraViewer"; }
+bool Instance::AddCategoryBeforePropertyNameWhenSerializing() const { return true; }
+
+
+// --- Input Handling ---
 bool Instance::OnUpdateCommandBar(Application::CommandBar& commandBar)
 {
     if (!yaraExecuted) {
@@ -496,7 +366,6 @@ bool Instance::OnUpdateCommandBar(Application::CommandBar& commandBar)
     }
     return false;
 }
-
 bool Instance::UpdateKeys(KeyboardControlsInterface* interfaceParam)
 {
     interfaceParam->RegisterKey(&Commands::YaraRunCommand);
@@ -510,7 +379,6 @@ bool Instance::UpdateKeys(KeyboardControlsInterface* interfaceParam)
 
     return true;
 }
-
 bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
 {
     if (eventType != Event::Command)
@@ -519,9 +387,7 @@ bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
     if (ID == Commands::YaraRunCommand.CommandId) {
         auto result = AppCUI::Dialogs::MessageBox::ShowOkCancel("Run Yara", "Are you sure?");
 
-
         if (result == Dialogs::Result::Ok) {
-        
             yaraExecuted = false;
             RunYara();
         }
@@ -532,7 +398,6 @@ bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
         GetRulesFiles();
 
     } else if (ID == Commands::EditRulesCommand.CommandId) {
-
         yaraGetRulesFiles = false;
         GetRulesFiles();
 
@@ -575,15 +440,6 @@ bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
 
     return false;
 }
-
-void Instance::OnAfterResize(int newWidth, int newHeight)
-{
-    layout.visibleLines = GetHeight();
-    if (layout.visibleLines > 0)
-        layout.visibleLines--;
-    layout.maxCharactersPerLine = GetWidth() - startingX /*left*/ - startingX /*right*/;
-}
-
 bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
 {
     if (keyCode == (Key::Ctrl | Key::C)) {
@@ -614,11 +470,11 @@ bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
     }
 
     if (keyCode == Key::Escape) {
-        this->selectionActive = false; 
-        this->searchActive    = false; 
+        this->selectionActive     = false;
+        this->searchActive        = false;
         this->isButtonFindPressed = false;
         this->SetFocus();
-        this->lastSearchText.clear();  
+        this->lastSearchText.clear();
         return true;
     }
 
@@ -665,35 +521,8 @@ bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
     return false;
 }
 
-void Instance::MoveTo()
-{
-    uint32 height         = this->GetHeight();
-    uint32 width          = this->GetWidth();
-    const int LEFT_MARGIN = 4;
 
-    uint32 totalVisible = (uint32) visibleIndices.size();
-
-    // Spațiul disponibil pentru text
-    uint32 textWidth = (width > LEFT_MARGIN) ? (width - LEFT_MARGIN) : 1;
-
-    // 1. SCROLL VERTICAL (Rânduri)
-    if (this->cursorRow < this->startViewLine) {
-        this->startViewLine = this->cursorRow;
-    } else if (this->cursorRow >= this->startViewLine + height) {
-        this->startViewLine = this->cursorRow - height + 1;
-    }
-
-    if (this->startViewLine > totalVisible)
-        this->startViewLine = 0;
-
-    // 2. SCROLL ORIZONTAL (Coloane)
-    if (this->cursorCol < this->leftViewCol) {
-        this->leftViewCol = this->cursorCol;
-    } else if (this->cursorCol >= this->leftViewCol + textWidth) {
-        this->leftViewCol = this->cursorCol - textWidth + 1;
-    }
-}
-
+// --- Mouse Handling ---
 bool Instance::OnMouseWheel(int x, int y, AppCUI::Input::MouseWheel direction, AppCUI::Input::Key key)
 {
     switch (direction) {
@@ -716,7 +545,67 @@ bool Instance::OnMouseWheel(int x, int y, AppCUI::Input::MouseWheel direction, A
 
     return false;
 }
+bool Instance::OnMouseDrag(int x, int y, AppCUI::Input::MouseButton button, AppCUI::Input::Key keyCode)
+{
+    if ((button & MouseButton::Left) == MouseButton::None)
+        return false;
+    if (yaraLines.empty())
+        return false;
 
+    ComputeMouseCoords(x, y, this->startViewLine, this->leftViewCol, this->yaraLines, this->cursorRow, this->cursorCol);
+
+    if (this->cursorRow != this->selectionAnchorRow || this->cursorCol != this->selectionAnchorCol) {
+        this->selectionActive = true;
+    }
+    MoveTo();
+    return true;
+}
+void Instance::OnMousePressed(int x, int y, AppCUI::Input::MouseButton button, AppCUI::Input::Key keyCode)
+{
+    if ((button & MouseButton::Left) == MouseButton::None)
+        return;
+    if (visibleIndices.empty() || yaraLines.empty())
+        return;
+
+    // 1. Calculăm rândul vizual
+    uint32 clickVisualRow = this->startViewLine + y;
+    if (clickVisualRow >= visibleIndices.size())
+        return;
+
+    // 2. Calculăm coordonatele exacte (Rând și Coloană)
+    // Această funcție va actualiza this->cursorRow și this->cursorCol
+    ComputeMouseCoords(x, y, this->startViewLine, this->leftViewCol, this->yaraLines, this->cursorRow, this->cursorCol);
+
+    // 3. --- FIXUL ESTE AICI ---
+    // Resetăm ancora de selecție la poziția curentă a cursorului
+    this->selectionAnchorRow = this->cursorRow;
+    this->selectionAnchorCol = this->cursorCol;
+    this->selectionActive    = false;
+
+    // 4. Logica pentru Header (Checkbox / Fold)
+    size_t realIndex = visibleIndices[clickVisualRow];
+    LineInfo& line   = yaraLines[realIndex];
+
+    // Calculăm X relativ la începutul textului (pentru detecție click pe elemente grafice)
+    int relX = (x - 4) + this->leftViewCol;
+
+    if (line.type == LineType::FileHeader) {
+        // Zona Checkbox: "[ ]" (index 0..3)
+        if (relX >= 0 && relX <= 2) {
+            line.isChecked = !line.isChecked;
+            return;
+        }
+
+        // Zona Săgeată: la finalul textului
+        int arrowStart = 4 + (int) line.text.length(); // 4 chars prefix + lungime nume
+        if (relX >= arrowStart && relX <= arrowStart + 1) {
+            ToggleFold(realIndex);
+            return;
+        }
+    }
+
+    MoveTo();
+}
 void Instance::ComputeMouseCoords(int x, int y, uint32 startViewLine, uint32 leftViewCol, const std::vector<LineInfo>& lines, uint32& outRow, uint32& outCol)
 {
     const int LEFT_MARGIN = 4;
@@ -760,71 +649,105 @@ void Instance::ComputeMouseCoords(int x, int y, uint32 startViewLine, uint32 lef
 
     outCol = c;
 }
-
-void Instance::OnMousePressed(int x, int y, AppCUI::Input::MouseButton button, AppCUI::Input::Key keyCode)
+void Instance::MoveTo()
 {
-    if ((button & MouseButton::Left) == MouseButton::None)
-        return;
-    if (visibleIndices.empty() || yaraLines.empty())
-        return;
+    uint32 height         = this->GetHeight();
+    uint32 width          = this->GetWidth();
+    const int LEFT_MARGIN = 4;
 
-    // 1. Calculăm rândul vizual
-    uint32 clickVisualRow = this->startViewLine + y;
-    if (clickVisualRow >= visibleIndices.size())
-        return;
+    uint32 totalVisible = (uint32) visibleIndices.size();
 
-    // 2. Calculăm coordonatele exacte (Rând și Coloană)
-    // Această funcție va actualiza this->cursorRow și this->cursorCol
-    ComputeMouseCoords(x, y, this->startViewLine, this->leftViewCol, this->yaraLines, this->cursorRow, this->cursorCol);
+    // Spațiul disponibil pentru text
+    uint32 textWidth = (width > LEFT_MARGIN) ? (width - LEFT_MARGIN) : 1;
 
-    // 3. --- FIXUL ESTE AICI ---
-    // Resetăm ancora de selecție la poziția curentă a cursorului
-    this->selectionAnchorRow = this->cursorRow;
-    this->selectionAnchorCol = this->cursorCol; 
-    this->selectionActive    = false;
-
-    // 4. Logica pentru Header (Checkbox / Fold)
-    size_t realIndex = visibleIndices[clickVisualRow];
-    LineInfo& line   = yaraLines[realIndex];
-
-    // Calculăm X relativ la începutul textului (pentru detecție click pe elemente grafice)
-    int relX = (x - 4) + this->leftViewCol;
-
-    if (line.type == LineType::FileHeader) {
-        // Zona Checkbox: "[ ]" (index 0..3)
-        if (relX >= 0 && relX <= 2) {
-            line.isChecked = !line.isChecked;
-            return;
-        }
-
-        // Zona Săgeată: la finalul textului
-        int arrowStart = 4 + (int) line.text.length(); // 4 chars prefix + lungime nume
-        if (relX >= arrowStart && relX <= arrowStart + 1) {
-            ToggleFold(realIndex);
-            return;
-        }
+    // 1. SCROLL VERTICAL (Rânduri)
+    if (this->cursorRow < this->startViewLine) {
+        this->startViewLine = this->cursorRow;
+    } else if (this->cursorRow >= this->startViewLine + height) {
+        this->startViewLine = this->cursorRow - height + 1;
     }
 
-    MoveTo();
+    if (this->startViewLine > totalVisible)
+        this->startViewLine = 0;
+
+    // 2. SCROLL ORIZONTAL (Coloane)
+    if (this->cursorCol < this->leftViewCol) {
+        this->leftViewCol = this->cursorCol;
+    } else if (this->cursorCol >= this->leftViewCol + textWidth) {
+        this->leftViewCol = this->cursorCol - textWidth + 1;
+    }
 }
 
 
-bool Instance::OnMouseDrag(int x, int y, AppCUI::Input::MouseButton button, AppCUI::Input::Key keyCode)
+// Selection & Folding
+void Instance::ToggleSelection()
 {
-    if ((button & MouseButton::Left) == MouseButton::None)
-        return false;
-    if (yaraLines.empty())
-        return false;
-
-    ComputeMouseCoords(x, y, this->startViewLine, this->leftViewCol, this->yaraLines, this->cursorRow, this->cursorCol);
-
-    if (this->cursorRow != this->selectionAnchorRow || this->cursorCol != this->selectionAnchorCol) {
-        this->selectionActive = true;
+    if (this->cursorRow < yaraLines.size()) {
+        if (yaraLines[this->cursorRow].type == LineType::FileHeader) {
+            yaraLines[this->cursorRow].isChecked = !yaraLines[this->cursorRow].isChecked;
+        }
     }
-    MoveTo();
-    return true;
 }
+void Instance::SelectAllRules()
+{
+    bool changesMade = false;
+    for (auto& line : yaraLines) {
+        if (line.type == LineType::FileHeader) {
+            if (!line.isChecked) {
+                line.isChecked = true;
+                changesMade    = true;
+            }
+        }
+    }
+}
+void Instance::DeselectAllRules()
+{
+    bool changesMade = false;
+    for (auto& line : yaraLines) {
+        if (line.type == LineType::FileHeader) {
+            if (line.isChecked) {
+                line.isChecked = false;
+                changesMade    = true;
+            }
+        }
+    }
+}
+void Instance::UpdateVisibleIndices()
+{
+    visibleIndices.clear();
+    for (size_t i = 0; i < yaraLines.size(); i++) {
+        if (yaraLines[i].isVisible) {
+            visibleIndices.push_back(i);
+        }
+    }
+}
+void Instance::ToggleFold(size_t index)
+{
+    if (index >= yaraLines.size())
+        return;
 
+    if (yaraLines[index].type == LineType::FileHeader) {
+        // Inversăm starea
+        bool newState               = !yaraLines[index].isExpanded;
+        yaraLines[index].isExpanded = newState;
+
+        // Iterăm în jos
+        for (size_t i = index + 1; i < yaraLines.size(); i++) {
+            if (yaraLines[i].type == LineType::FileHeader || yaraLines[i].type == LineType::Info || yaraLines[i].type == LineType::Match) {
+                break;
+            }
+
+            // --- AICI E SCHIMBAREA ---
+            // Ascundem/Arătăm DOAR conținutul efectiv al regulii
+            if (yaraLines[i].type == LineType::RuleContent) {
+                yaraLines[i].isVisible = newState;
+            }
+            // Liniile 'Normal' (spații goale, separatoare) rămân vizibile sau le legăm și pe ele de header
+            // Dacă vrei să ascunzi TOT ce e sub header până la următorul, scoate 'if'-ul de mai sus
+        }
+        UpdateVisibleIndices();
+    }
+}
 void Instance::CopySelectionToClipboard()
 {
     // Variabila în care vom construi textul
@@ -888,160 +811,123 @@ void Instance::CopySelectionToClipboard()
     }
 }
 
-void Instance::ToggleSelection()
+
+// Search Helpers
+// Helper pentru selectare (ca să nu scriem codul de 2 ori)
+void Instance::SelectMatch(uint32 visualRow, size_t startRawCol, uint32 length)
 {
-    if (this->cursorRow < yaraLines.size()) {
-        if (yaraLines[this->cursorRow].type == LineType::FileHeader) {
-            yaraLines[this->cursorRow].isChecked = !yaraLines[this->cursorRow].isChecked;
+    // 1. Aflăm indexul REAL
+    size_t realIndex = visibleIndices[visualRow];
+    const auto& line = yaraLines[realIndex];
+
+    // 2. Calculăm coloana vizuală
+    size_t visualCol = startRawCol;
+    if (line.type == LineType::FileHeader)
+        visualCol += 4; // "[ ] "
+    else if (line.indentLevel > 0)
+        visualCol += 4; // "    "
+
+    // 3. SETĂM VARIABILELE DE HIGHLIGHT (NU SELECȚIA)
+    this->searchActive          = true;
+    this->searchResultRealIndex = realIndex; // Reținem linia reală
+    this->searchResultStartCol  = (uint32) visualCol;
+    this->searchResultLen       = length;
+
+    // 4. Mutăm doar cursorul acolo (fără să activăm selecția)
+    this->cursorRow = visualRow;
+    this->cursorCol = (uint32) (visualCol + length);
+
+    // Asigurăm-ne că selecția veche e oprită
+    this->selectionActive = false;
+
+    MoveTo();
+}
+bool Instance::FindNext()
+{
+    if (lastSearchText.empty())
+        return false;
+    if (visibleIndices.empty() || yaraLines.empty())
+        return false;
+
+    // 1. Pregătire text (lowercase)
+    std::string textToFindLower = lastSearchText;
+    std::transform(textToFindLower.begin(), textToFindLower.end(), textToFindLower.begin(), ::tolower);
+
+    uint32 totalLines = (uint32) yaraLines.size();
+
+    // --- PASUL CRITIC: Aflăm indexul REAL al liniei curente ---
+    // cursorRow este vizual. Trebuie să luăm indexul real din visibleIndices.
+    uint32 currentRealIndex = 0;
+    if (this->cursorRow < visibleIndices.size()) {
+        currentRealIndex = (uint32) visibleIndices[this->cursorRow];
+    }
+
+    // --- FAZA 1: Căutăm pe restul liniei curente (REALĂ) ---
+    {
+        const auto& line      = yaraLines[currentRealIndex]; // Folosim indexul REAL
+        std::string lineLower = line.text;
+        std::transform(lineLower.begin(), lineLower.end(), lineLower.begin(), ::tolower);
+
+        // Calculăm offset-ul
+        int searchStartOffset = this->cursorCol;
+        if (line.type == LineType::FileHeader)
+            searchStartOffset -= 4; // "[ ] "
+        else if (line.indentLevel > 0)
+            searchStartOffset -= 4; // "    "
+
+        if (searchStartOffset < 0)
+            searchStartOffset = 0;
+
+        // Căutăm
+        size_t foundPos = lineLower.find(textToFindLower, searchStartOffset);
+
+        if (foundPos != std::string::npos) {
+            // Pentru selectare avem nevoie de rândul VIZUAL (care e this->cursorRow)
+            SelectMatch(this->cursorRow, foundPos, (uint32) textToFindLower.length());
+            return true;
         }
     }
-}
 
-void Instance::UpdateVisibleIndices()
-{
-    visibleIndices.clear();
-    for (size_t i = 0; i < yaraLines.size(); i++) {
-        if (yaraLines[i].isVisible) {
-            visibleIndices.push_back(i);
-        }
-    }
-}
+    // --- FAZA 2: Căutăm pe următoarele linii (folosind indecși REALI) ---
+    // Folosim i <= totalLines pentru a permite wrap-around complet (inclusiv revenirea la linia curentă la început)
+    for (uint32 i = 1; i <= totalLines; i++) {
+        uint32 nextRealIdx = (currentRealIndex + i) % totalLines; // Wrap around pe datele reale
 
-void Instance::ToggleFold(size_t index)
-{
-    if (index >= yaraLines.size())
-        return;
+        const auto& line      = yaraLines[nextRealIdx];
+        std::string lineLower = line.text;
+        std::transform(lineLower.begin(), lineLower.end(), lineLower.begin(), ::tolower);
 
-    if (yaraLines[index].type == LineType::FileHeader) {
-        // Inversăm starea
-        bool newState               = !yaraLines[index].isExpanded;
-        yaraLines[index].isExpanded = newState;
+        size_t foundPos = lineLower.find(textToFindLower); // De la 0
 
-        // Iterăm în jos
-        for (size_t i = index + 1; i < yaraLines.size(); i++) {
-            if (yaraLines[i].type == LineType::FileHeader || yaraLines[i].type == LineType::Info || yaraLines[i].type == LineType::Match) {
-                break;
-            }
-
-            // --- AICI E SCHIMBAREA ---
-            // Ascundem/Arătăm DOAR conținutul efectiv al regulii
-            if (yaraLines[i].type == LineType::RuleContent) {
-                yaraLines[i].isVisible = newState;
-            }
-            // Liniile 'Normal' (spații goale, separatoare) rămân vizibile sau le legăm și pe ele de header
-            // Dacă vrei să ascunzi TOT ce e sub header până la următorul, scoate 'if'-ul de mai sus
-        }
-        UpdateVisibleIndices();
-    }
-}
-
-void Instance::SelectAllRules()
-{
-    bool changesMade = false;
-    for (auto& line : yaraLines) {
-        if (line.type == LineType::FileHeader) {
-            if (!line.isChecked) {
-                line.isChecked = true;
-                changesMade    = true;
-            }
-        }
-    }
-  
-}
-
-void Instance::DeselectAllRules()
-{
-    bool changesMade = false;
-    for (auto& line : yaraLines) {
-        if (line.type == LineType::FileHeader) {
-            if (line.isChecked) {
-                line.isChecked = false;
-                changesMade    = true;
-            }
-        }
-    }
-}
-
-
-void Instance::GetRulesFiles()
-{
-    if (yaraGetRulesFiles)
-        return;
-
-    // ---------------------------------------------------------
-    // RESETARE INTERFATA
-    // ---------------------------------------------------------
-    this->cursorRow          = 0;
-    this->cursorCol          = 0;
-    this->startViewLine      = 0;
-    this->leftViewCol        = 0;
-    this->selectionActive    = false;
-    this->selectionAnchorRow = 0;
-    this->selectionAnchorCol = 0;
-
-    yaraLines.clear();
-
-    fs::path currentPath = fs::current_path();
-    fs::path rootPath    = currentPath.parent_path().parent_path();
-    fs::path yaraRules   = rootPath / "3rdPartyLibs" / "rules";
-
-    if (!fs::exists(yaraRules) || !fs::is_directory(yaraRules))
-        return;
-
-    // Header info
-    yaraLines.push_back({ "=== YARA RULES SELECTION ===", LineType::Normal });
-    yaraLines.push_back({ "", LineType::Normal });
-    yaraLines.push_back({ "Controls:", LineType::Match });
-    yaraLines.push_back({ "   [Space] or [Click] : Toggle selection", LineType::Normal });
-    yaraLines.push_back({ "   [Ctrl + A]         : Select All", LineType::Normal });
-    yaraLines.push_back({ "   [Ctrl + D]         : Deselect All", LineType::Normal });
-    yaraLines.push_back({ "   [F6] Run | [F7] View Rules | [F8] Edit", LineType::Normal });
-
-    // --- 2. DELIMITARE ---
-    yaraLines.push_back({ "_________________________________________", LineType::Normal });
-    yaraLines.push_back({ "", LineType::Normal });
-
-    // --- 3. TITLU LISTĂ ---
-    yaraLines.push_back({ "Rules list:", LineType::Info }); // Folosesc Info ca să fie galben (opțional) sau Normal
-    yaraLines.push_back({ "", LineType::Normal });
-
-    for (auto& entry : fs::directory_iterator(yaraRules)) {
-        if (entry.is_regular_file()) {
-            std::string filename = entry.path().filename().string();
-
-            // Adăugăm HEADER-ul fișierului (care va avea checkbox)
-            LineInfo header;
-            header.text       = filename;
-            header.type       = LineType::FileHeader;
-            header.isChecked  = false;
-            header.filePath   = entry.path();
-            header.isExpanded = false; // <--- START PLIAT
-            header.isVisible  = true;
-            yaraLines.push_back(header);
-
-            std::ifstream in(entry.path());
-            if (in.is_open()) {
-                std::string line;
-                while (std::getline(in, line)) {
-                    while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
-                        line.pop_back();
-
-                    // CONȚINUT (Invizibil la start)
-                    LineInfo content;
-                    content.text        = line;
-                    content.type        = LineType::RuleContent;
-                    content.isVisible   = false; // <--- ASCUNS PÂNĂ DAI ENTER
-                    content.indentLevel = 1;
-                    yaraLines.push_back(content);
+        if (foundPos != std::string::npos) {
+            // 1. Expandăm dacă e ascuns
+            if (!line.isVisible) {
+                for (int k = (int) nextRealIdx - 1; k >= 0; k--) {
+                    if (yaraLines[k].type == LineType::FileHeader) {
+                        if (!yaraLines[k].isExpanded)
+                            ToggleFold(k);
+                        break;
+                    }
                 }
             }
-            yaraLines.push_back({ "", LineType::Normal });
+
+            // 2. Găsim noul index VIZUAL pentru linia reală găsită
+            // (Deoarece ToggleFold a modificat visibleIndices, trebuie să căutăm unde a ajuns linia)
+            for (size_t v = 0; v < visibleIndices.size(); v++) {
+                if (visibleIndices[v] == nextRealIdx) {
+                    SelectMatch((uint32) v, foundPos, (uint32) textToFindLower.length());
+                    return true;
+                }
+            }
         }
     }
-    UpdateVisibleIndices();
-    yaraGetRulesFiles = true;
+
+    AppCUI::Dialogs::MessageBox::ShowNotification("Info", "No more occurrences found.");
+    return false;
 }
 
+
+// --- Internal Logic Methods ---
 void Instance::RunYara()
 {
     // ---------------------------------------------------------
@@ -1080,10 +966,10 @@ void Instance::RunYara()
     // ---------------------------------------------------------
     // 3. RESETARE INTERFATA
     // ---------------------------------------------------------
-    this->cursorRow     = 0;
-    this->cursorCol     = 0;
-    this->startViewLine = 0;
-    this->leftViewCol   = 0;
+    this->cursorRow          = 0;
+    this->cursorCol          = 0;
+    this->startViewLine      = 0;
+    this->leftViewCol        = 0;
     this->selectionActive    = false;
     this->selectionAnchorRow = 0;
     this->selectionAnchorCol = 0;
@@ -1162,7 +1048,7 @@ void Instance::RunYara()
                         globalMatchCount++;
                         yaraLines.push_back({ "    [MATCH] Rule: " + currentRule, LineType::Match });
                         if (!currentTags.empty())
-                        yaraLines.push_back({ "    Tags: " + currentTags, LineType::Normal });
+                            yaraLines.push_back({ "    Tags: " + currentTags, LineType::Normal });
                         if (!currentAuthor.empty())
                             yaraLines.push_back({ "    Author: " + currentAuthor, LineType::Normal });
                         if (!currentSeverity.empty())
@@ -1181,7 +1067,7 @@ void Instance::RunYara()
                                 std::string prefix = "           ";
 
                                 if (ctxPair.first.find("0x") == 0) {
-                                    prefix += "    "; 
+                                    prefix += "    ";
                                 }
 
                                 infoLine.text = prefix + ctxPair.first;
@@ -1190,11 +1076,9 @@ void Instance::RunYara()
                                 yaraLines.push_back(infoLine);
                             }
 
-
                             // 2 Disassembly
                             auto disasmLines = ExtractDisassemblyFromYaraMatch(s, currentFile.string()); // context 32 bytes înainte și după
                             for (auto& disPair : disasmLines) {
-
                                 LineInfo infoLine;
                                 if (disPair.first.find("Disassembly:") != std::string::npos) {
                                     // Titlul îl punem mai în stânga (indentare mai mică)
@@ -1208,8 +1092,6 @@ void Instance::RunYara()
 
                                 yaraLines.push_back(infoLine);
                             }
-
-
                         }
                         yaraLines.push_back({ "", LineType::Normal });
                     }
@@ -1263,7 +1145,7 @@ void Instance::RunYara()
                 globalMatchCount++;
                 yaraLines.push_back({ "    [MATCH] Rule: " + currentRule, LineType::Normal });
                 if (!currentTags.empty())
-                yaraLines.push_back({ "    Tags: " + currentTags, LineType::Normal });
+                    yaraLines.push_back({ "    Tags: " + currentTags, LineType::Normal });
                 if (!currentAuthor.empty())
                     yaraLines.push_back({ "    Author: " + currentAuthor, LineType::Normal });
                 if (!currentSeverity.empty())
@@ -1279,7 +1161,7 @@ void Instance::RunYara()
                         std::string prefix = "           ";
 
                         if (ctxPair.first.find("0x") == 0) {
-                            prefix += "    "; 
+                            prefix += "    ";
                         }
 
                         infoLine.text = prefix + ctxPair.first;
@@ -1287,7 +1169,6 @@ void Instance::RunYara()
 
                         yaraLines.push_back(infoLine);
                     }
-
 
                     // 2️⃣ Disassembly
                     // Folosim aceeași extragere de offset din linia YARA
@@ -1311,7 +1192,6 @@ void Instance::RunYara()
 
                         yaraLines.push_back(infoLine);
                     }
-
                 }
                 yaraLines.push_back({ "", LineType::Normal });
             } else if (!foundAnyInFile) {
@@ -1339,9 +1219,202 @@ void Instance::RunYara()
     yaraGetRulesFiles = true; // Previne reîncărcarea automată
     UpdateVisibleIndices();
 }
+std::string Instance::GetSectionFromOffset(const std::string& exePath, uint64_t offset)
+{
+    std::ifstream file(exePath, std::ios::binary);
+    if (!file)
+        return "UNKNOWN";
+
+    // 1️⃣ DOS Header
+    IMAGE_DOS_HEADER dos{};
+    file.read(reinterpret_cast<char*>(&dos), sizeof(dos));
+    if (dos.e_magic != IMAGE_DOS_SIGNATURE)
+        return "NOT_A_PE";
+
+    // 2️⃣ NT Headers
+    file.seekg(dos.e_lfanew, std::ios::beg);
+    DWORD signature = 0;
+    file.read(reinterpret_cast<char*>(&signature), sizeof(signature));
+    if (signature != IMAGE_NT_SIGNATURE)
+        return "NOT_A_PE";
+
+    IMAGE_FILE_HEADER fileHeader{};
+    file.read(reinterpret_cast<char*>(&fileHeader), sizeof(fileHeader));
+
+    // 3️⃣ Detect 32-bit vs 64-bit
+    IMAGE_OPTIONAL_HEADER32 optional32{};
+    IMAGE_OPTIONAL_HEADER64 optional64{};
+    bool is64 = false;
+    WORD magic;
+    file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    file.seekg(-static_cast<int>(sizeof(magic)), std::ios::cur);
+
+    if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+        file.read(reinterpret_cast<char*>(&optional32), sizeof(optional32));
+        is64 = false;
+    } else if (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        file.read(reinterpret_cast<char*>(&optional64), sizeof(optional64));
+        is64 = true;
+    } else {
+        return "UNKNOWN";
+    }
+
+    // 4️⃣ Secțiuni
+    std::vector<IMAGE_SECTION_HEADER> sections(fileHeader.NumberOfSections);
+    for (int i = 0; i < fileHeader.NumberOfSections; i++) {
+        file.read(reinterpret_cast<char*>(&sections[i]), sizeof(IMAGE_SECTION_HEADER));
+    }
+
+    // 5️⃣ Căutăm secțiunea pentru offset
+    for (const auto& sec : sections) {
+        DWORD start = sec.PointerToRawData;
+        DWORD end   = start + sec.SizeOfRawData;
+        if (offset >= start && offset < end) {
+            return std::string(reinterpret_cast<const char*>(sec.Name), strnlen(reinterpret_cast<const char*>(sec.Name), 8));
+        }
+    }
+
+    return "UNKNOWN";
+}
+void Instance::GetRulesFiles()
+{
+    if (yaraGetRulesFiles)
+        return;
+
+    // ---------------------------------------------------------
+    // RESETARE INTERFATA
+    // ---------------------------------------------------------
+    this->cursorRow          = 0;
+    this->cursorCol          = 0;
+    this->startViewLine      = 0;
+    this->leftViewCol        = 0;
+    this->selectionActive    = false;
+    this->selectionAnchorRow = 0;
+    this->selectionAnchorCol = 0;
+
+    yaraLines.clear();
+
+    fs::path currentPath = fs::current_path();
+    fs::path rootPath    = currentPath.parent_path().parent_path();
+    fs::path yaraRules   = rootPath / "3rdPartyLibs" / "rules";
+
+    if (!fs::exists(yaraRules) || !fs::is_directory(yaraRules))
+        return;
+
+    // Header info
+    yaraLines.push_back({ "=== YARA RULES SELECTION ===", LineType::Normal });
+    yaraLines.push_back({ "", LineType::Normal });
+    yaraLines.push_back({ "Controls:", LineType::Match });
+    yaraLines.push_back({ "   [Space] or [Click] : Toggle selection", LineType::Normal });
+    yaraLines.push_back({ "   [Ctrl + A]         : Select All", LineType::Normal });
+    yaraLines.push_back({ "   [Ctrl + D]         : Deselect All", LineType::Normal });
+    yaraLines.push_back({ "   [F6] Run | [F7] View Rules | [F8] Edit", LineType::Normal });
+
+    // --- 2. DELIMITARE ---
+    yaraLines.push_back({ "_________________________________________", LineType::Normal });
+    yaraLines.push_back({ "", LineType::Normal });
+
+    // --- 3. TITLU LISTĂ ---
+    yaraLines.push_back({ "Rules list:", LineType::Info }); // Folosesc Info ca să fie galben (opțional) sau Normal
+    yaraLines.push_back({ "", LineType::Normal });
+
+    for (auto& entry : fs::directory_iterator(yaraRules)) {
+        if (entry.is_regular_file()) {
+            std::string filename = entry.path().filename().string();
+
+            // Adăugăm HEADER-ul fișierului (care va avea checkbox)
+            LineInfo header;
+            header.text       = filename;
+            header.type       = LineType::FileHeader;
+            header.isChecked  = false;
+            header.filePath   = entry.path();
+            header.isExpanded = false; // <--- START PLIAT
+            header.isVisible  = true;
+            yaraLines.push_back(header);
+
+            std::ifstream in(entry.path());
+            if (in.is_open()) {
+                std::string line;
+                while (std::getline(in, line)) {
+                    while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+                        line.pop_back();
+
+                    // CONȚINUT (Invizibil la start)
+                    LineInfo content;
+                    content.text        = line;
+                    content.type        = LineType::RuleContent;
+                    content.isVisible   = false; // <--- ASCUNS PÂNĂ DAI ENTER
+                    content.indentLevel = 1;
+                    yaraLines.push_back(content);
+                }
+            }
+            yaraLines.push_back({ "", LineType::Normal });
+        }
+    }
+    UpdateVisibleIndices();
+    yaraGetRulesFiles = true;
+}
+void Instance::ExportResults()
+{
+    // 1. Verificăm dacă avem ce salva
+    if (yaraLines.empty()) {
+        AppCUI::Dialogs::MessageBox::ShowError("Error", "No scan results to save!");
+        return;
+    }
+
+    // 2. ÎNTREBAREA DE CONFIRMARE (Acesta este pasul cerut)
+    auto response = AppCUI::Dialogs::MessageBox::ShowOkCancel("Save Report", "Do you want to save the scan results to a text file?");
+
+    if (response != Dialogs::Result::Ok) {
+        return; // Dacă userul dă Cancel sau X, ieșim și nu salvăm nimic.
+    }
+
+    // 3. Generăm numele cu data curentă
+    auto now       = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H-%M-%S");
+    std::string fileName = "results_" + ss.str() + ".txt";
+
+    // 4. Pregătim calea: root/3rdPartyLibs/results/
+    fs::path currentPath = fs::current_path();
+    fs::path rootPath    = currentPath.parent_path().parent_path();
+    fs::path resultsDir  = rootPath / "3rdPartyLibs" / "results";
+
+    if (!fs::exists(resultsDir)) {
+        fs::create_directories(resultsDir);
+    }
+
+    fs::path fullPath = resultsDir / fileName;
+
+    // 5. Scrierea efectivă
+    std::ofstream out(fullPath);
+    if (!out.is_open()) {
+        AppCUI::Dialogs::MessageBox::ShowError("Error", "Could not create file!");
+        return;
+    }
+
+    for (const auto& line : yaraLines) {
+        // Păstrăm indentarea
+        for (int i = 0; i < line.indentLevel; i++)
+            out << "\t";
+
+        // Păstrăm checkbox-ul vizual
+        if (line.type == LineType::FileHeader) {
+            out << (line.isChecked ? "[x] " : "[ ] ");
+        }
+
+        out << line.text << "\n";
+    }
+    out.close();
+
+    // 6. Notificare finală și deschidere folder
+    AppCUI::Dialogs::MessageBox::ShowNotification("Saved", "Report saved successfully!\nOpening folder...");
+    ShellExecuteA(NULL, "explore", resultsDir.string().c_str(), NULL, NULL, SW_SHOWNORMAL);
+}
 
 
-// --- MODIFICARE: Adăugăm namespace-ul complet în tipul returnat ---
 std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance::ExtractHexContextFromYaraMatch(
       const std::string& yaraLine, const std::string& exePath, size_t contextSize)
 {
@@ -1431,7 +1504,7 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
     output.insert(output.begin(), { "Hex Dump:", LineType::Normal });
 
     // Offset (Verde - folosind LineType::Info)
-    output.insert(output.begin() + 1, { header.str(), LineType::OffsetHeader }); 
+    output.insert(output.begin() + 1, { header.str(), LineType::OffsetHeader });
     // Secțiune (Alb sau Roșu, cum preferi - aici e Normal)
     output.insert(output.begin() + 2, { section.str(), LineType::Normal });
 
@@ -1440,10 +1513,7 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
 
 
 std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance::ExtractDisassemblyFromYaraMatch(
-      const std::string& yaraLine,
-      const std::string& exePath,
-      size_t contextSize // total bytes pentru disassembly
-)
+      const std::string& yaraLine, const std::string& exePath, size_t contextSize) // total bytes pentru disassembly
 {
     // Returnăm perechi (Text, Culoare)
     std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> output;
@@ -1525,124 +1595,4 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
     cs_close(&handle);
 
     return output;
-}
-
-
-std::string Instance::GetSectionFromOffset(const std::string& exePath, uint64_t offset)
-{
-    std::ifstream file(exePath, std::ios::binary);
-    if (!file)
-        return "UNKNOWN";
-
-    // 1️⃣ DOS Header
-    IMAGE_DOS_HEADER dos{};
-    file.read(reinterpret_cast<char*>(&dos), sizeof(dos));
-    if (dos.e_magic != IMAGE_DOS_SIGNATURE)
-        return "NOT_A_PE";
-
-    // 2️⃣ NT Headers
-    file.seekg(dos.e_lfanew, std::ios::beg);
-    DWORD signature = 0;
-    file.read(reinterpret_cast<char*>(&signature), sizeof(signature));
-    if (signature != IMAGE_NT_SIGNATURE)
-        return "NOT_A_PE";
-
-    IMAGE_FILE_HEADER fileHeader{};
-    file.read(reinterpret_cast<char*>(&fileHeader), sizeof(fileHeader));
-
-    // 3️⃣ Detect 32-bit vs 64-bit
-    IMAGE_OPTIONAL_HEADER32 optional32{};
-    IMAGE_OPTIONAL_HEADER64 optional64{};
-    bool is64 = false;
-    WORD magic;
-    file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
-    file.seekg(-static_cast<int>(sizeof(magic)), std::ios::cur);
-
-    if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
-        file.read(reinterpret_cast<char*>(&optional32), sizeof(optional32));
-        is64 = false;
-    } else if (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
-        file.read(reinterpret_cast<char*>(&optional64), sizeof(optional64));
-        is64 = true;
-    } else {
-        return "UNKNOWN";
-    }
-
-    // 4️⃣ Secțiuni
-    std::vector<IMAGE_SECTION_HEADER> sections(fileHeader.NumberOfSections);
-    for (int i = 0; i < fileHeader.NumberOfSections; i++) {
-        file.read(reinterpret_cast<char*>(&sections[i]), sizeof(IMAGE_SECTION_HEADER));
-    }
-
-    // 5️⃣ Căutăm secțiunea pentru offset
-    for (const auto& sec : sections) {
-        DWORD start = sec.PointerToRawData;
-        DWORD end   = start + sec.SizeOfRawData;
-        if (offset >= start && offset < end) {
-            return std::string(reinterpret_cast<const char*>(sec.Name), strnlen(reinterpret_cast<const char*>(sec.Name), 8));
-        }
-    }
-
-    return "UNKNOWN";
-}
-
-
-void Instance::ExportResults()
-{
-    // 1. Verificăm dacă avem ce salva
-    if (yaraLines.empty()) {
-        AppCUI::Dialogs::MessageBox::ShowError("Error", "No scan results to save!");
-        return;
-    }
-
-    // 2. ÎNTREBAREA DE CONFIRMARE (Acesta este pasul cerut)
-    auto response = AppCUI::Dialogs::MessageBox::ShowOkCancel("Save Report", "Do you want to save the scan results to a text file?");
-
-    if (response != Dialogs::Result::Ok) {
-        return; // Dacă userul dă Cancel sau X, ieșim și nu salvăm nimic.
-    }
-
-    // 3. Generăm numele cu data curentă
-    auto now       = std::chrono::system_clock::now();
-    auto in_time_t = std::chrono::system_clock::to_time_t(now);
-
-    std::stringstream ss;
-    ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H-%M-%S");
-    std::string fileName = "results_" + ss.str() + ".txt";
-
-    // 4. Pregătim calea: root/3rdPartyLibs/results/
-    fs::path currentPath = fs::current_path();
-    fs::path rootPath    = currentPath.parent_path().parent_path();
-    fs::path resultsDir  = rootPath / "3rdPartyLibs" / "results";
-
-    if (!fs::exists(resultsDir)) {
-        fs::create_directories(resultsDir);
-    }
-
-    fs::path fullPath = resultsDir / fileName;
-
-    // 5. Scrierea efectivă
-    std::ofstream out(fullPath);
-    if (!out.is_open()) {
-        AppCUI::Dialogs::MessageBox::ShowError("Error", "Could not create file!");
-        return;
-    }
-
-    for (const auto& line : yaraLines) {
-        // Păstrăm indentarea
-        for (int i = 0; i < line.indentLevel; i++)
-            out << "\t";
-
-        // Păstrăm checkbox-ul vizual
-        if (line.type == LineType::FileHeader) {
-            out << (line.isChecked ? "[x] " : "[ ] ");
-        }
-
-        out << line.text << "\n";
-    }
-    out.close();
-
-    // 6. Notificare finală și deschidere folder
-    AppCUI::Dialogs::MessageBox::ShowNotification("Saved", "Report saved successfully!\nOpening folder...");
-    ShellExecuteA(NULL, "explore", resultsDir.string().c_str(), NULL, NULL, SW_SHOWNORMAL);
 }
