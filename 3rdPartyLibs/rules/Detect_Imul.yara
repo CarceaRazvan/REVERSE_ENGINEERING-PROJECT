@@ -1,3 +1,5 @@
+import "pe"
+
 rule Detect_IMUL_Instruction
 {
     meta:
@@ -8,5 +10,5 @@ rule Detect_IMUL_Instruction
         $imul_imm = { 6B ?? ?? }      // imul reg, reg, imm8
 
     condition:
-        any of them
+        pe.is_pe and any of them
 }
