@@ -125,6 +125,11 @@ namespace GView::View::YaraViewer
         void ToggleFold(size_t index); // Deschide/Închide folder
 
         std::vector<std::string> ExtractHexContextFromYaraMatch(const std::string& yaraLine, const std::string& exePath, size_t contextSize = 64);
+        std::vector<std::string> ExtractDisassemblyFromYaraMatch(
+              const std::string& yaraLine,
+              const std::string& exePath,
+              size_t contextSize = 32// bytes after offset
+        );
         std::string GetSectionFromOffset(const std::string& exePath, uint64_t offset);
 
     };
