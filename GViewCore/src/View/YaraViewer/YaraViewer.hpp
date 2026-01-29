@@ -15,11 +15,13 @@ namespace GView::View::YaraViewer
         constexpr int CMD_EDIT_RULES                 = 0x03;
         constexpr int CMD_SELECT_ALL                 = 0x04;
         constexpr int CMD_DESELECT_ALL               = 0x05;
+        constexpr int CMD_FIND_NEXT                  = 0x06;
         static KeyboardControl SomeCommand           = { Input::Key::F6, "Yara Run", "SomeCommand explanation", DEMOVIEWER_SOME_CMD };
         static KeyboardControl SomeCommandViewRules  = { Input::Key::F7, "View Rules", "View all the rules from folder rules", DEMOVIEWER_SOME_CMD_VIEW_RULES };
         static KeyboardControl EditRulesCommand      = { Input::Key::F8, "Edit Rules", "Open rules folder to manage files", CMD_EDIT_RULES };
         static KeyboardControl SelectAllCommand      = { Input::Key::Ctrl | Input::Key::A, "Select All", "Select all available rules", CMD_SELECT_ALL };
         static KeyboardControl DeselectAllCommand    = { Input::Key::Ctrl | Input::Key::D, "Deselect All", "Deselect all rules", CMD_DESELECT_ALL };
+        static KeyboardControl FindNextCommand       = { Input::Key::F3, "Find Next", "Go to next occurrence", CMD_FIND_NEXT };
     }
 
     struct SettingsData
@@ -76,6 +78,13 @@ namespace GView::View::YaraViewer
 
         std::vector<size_t> visibleIndices;
 
+        std::string lastSearchText;
+
+        bool searchActive            = false;
+        size_t searchResultRealIndex = 0; // Indexul real din yaraLines (nu cel vizual!)
+        uint32 searchResultStartCol  = 0; // Coloana vizuală de start
+        uint32 searchResultLen       = 0;
+
      public:
         uint32 startViewLine;
         uint32 leftViewCol;
@@ -85,6 +94,8 @@ namespace GView::View::YaraViewer
         bool selectionActive;
         uint32 selectionAnchorRow;
         uint32 selectionAnchorCol;
+
+        
 
         Instance(Reference<GView::Object> _obj, Settings* _settings);
 
@@ -123,9 +134,52 @@ namespace GView::View::YaraViewer
 
         void UpdateVisibleIndices();   // Recalculează ce e vizibil
         void ToggleFold(size_t index); // Deschide/Închide folder
+        
+        void SelectMatch(uint32 row, size_t startRawCol, uint32 length);
+        bool FindNext();
 
         std::vector<std::string> ExtractHexContextFromYaraMatch(const std::string& yaraLine, const std::string& exePath, size_t contextSize = 16);
 
+    };
+
+
+    class FindDialog : public AppCUI::Controls::Window
+    {
+        Reference<AppCUI::Controls::TextField> input;
+
+      public:
+        std::string resultText;
+
+        FindDialog() : Window("Find Text", "d:c,w:60,h:8", WindowFlags::ProcessReturn)
+        {
+            // Eticheta
+            AppCUI::Controls::Factory::Label::Create(this, "Search for:", "x:1,y:1,w:56");
+
+            // Câmpul de text
+            input = AppCUI::Controls::Factory::TextField::Create(this, "", "x:1,y:2,w:56");
+            input->SetHotKey('S'); // Alt+S sare aici
+
+            // Butoanele
+            AppCUI::Controls::Factory::Button::Create(this, "&Find", "l:16,b:0,w:13", 100)->SetFocus();
+            AppCUI::Controls::Factory::Button::Create(this, "&Cancel", "l:31,b:0,w:13", 101);
+        }
+
+        bool OnEvent(Reference<Control> sender, Event eventType, int controlID) override
+        {
+            if (eventType == Event::ButtonClicked || eventType == Event::WindowAccept) {
+                if ((eventType == Event::ButtonClicked && controlID == 100) || eventType == Event::WindowAccept) {
+                    resultText = std::string(input->GetText());
+                    Exit(Dialogs::Result::Ok);
+                    return true;
+                }
+                if (controlID == 101) // ID-ul butonului Cancel
+                {
+                    Exit(Dialogs::Result::Cancel);
+                    return true;
+                }
+            }
+            return Window::OnEvent(sender, eventType, controlID);
+        }
     };
 
 }; // namespace GView
