@@ -9,6 +9,8 @@
 
 #include <windows.h>
 #include <shellapi.h>
+#include "capstone/capstone.h"
+
 #undef MessageBox
 
 using namespace GView::View::YaraViewer;
@@ -1162,6 +1164,15 @@ void Instance::RunYara()
                             auto ctx = ExtractHexContextFromYaraMatch(s, currentFile.string());
                             for (auto& ctxLine : ctx)
                                 yaraLines.push_back({ "                " + ctxLine, LineType::Normal });
+
+
+                            // 2️⃣ Disassembly
+                            // Folosim aceeași extragere de offset din linia YARA
+                            auto disasmLines = ExtractDisassemblyFromYaraMatch(s, currentFile.string()); // context 32 bytes înainte și după
+                            for (auto& disLine : disasmLines)
+                                yaraLines.push_back({ "                " + disLine, LineType::Normal });
+
+
                         }
                         yaraLines.push_back({ "", LineType::Normal });
                     }
@@ -1228,6 +1239,14 @@ void Instance::RunYara()
                     auto ctx = ExtractHexContextFromYaraMatch(s, currentFile.string());
                     for (auto& ctxLine : ctx)
                         yaraLines.push_back({ "                " + ctxLine, LineType::Normal });
+
+
+                    // 2️⃣ Disassembly
+                    // Folosim aceeași extragere de offset din linia YARA
+                    auto disasmLines = ExtractDisassemblyFromYaraMatch(s, currentFile.string()); // context 32 bytes înainte și după
+                    for (auto& disLine : disasmLines)
+                        yaraLines.push_back({ "                " + disLine, LineType::Normal });
+
                 }
                 yaraLines.push_back({ "", LineType::Normal });
             } else if (!foundAnyInFile) {
@@ -1328,10 +1347,82 @@ std::vector<std::string> Instance::ExtractHexContextFromYaraMatch(
     std::string sectionName = GetSectionFromOffset(exePath, offset);
     section << "Section: " << sectionName;
 
+    output.insert(output.begin(), "Hex Dump:");
     output.insert(output.begin(), header.str());
     output.insert(output.begin(), section.str());
     return output;
 }
+
+
+std::vector<std::string> Instance::ExtractDisassemblyFromYaraMatch(
+      const std::string& yaraLine,
+      const std::string& exePath,
+      size_t contextSize // total bytes pentru disassembly (ex. 32)
+)
+{
+    std::vector<std::string> output;
+
+    // 1️⃣ Extragem offset-ul din linia YARA
+    size_t pos = yaraLine.find(':');
+    if (pos == std::string::npos)
+        return output;
+
+    std::string offsetStr = yaraLine.substr(0, pos);
+    uint64_t offset       = 0;
+    try {
+        offset = std::stoull(offsetStr, nullptr, 16);
+    } catch (...) {
+        output.push_back("EROARE: Offset invalid");
+        return output;
+    }
+
+    // 2️⃣ Deschidem fișierul
+    std::ifstream file(exePath, std::ios::binary);
+    if (!file.is_open()) {
+        output.push_back("EROARE: Nu pot deschide fișierul");
+        return output;
+    }
+
+    // 3️⃣ Citim buffer de la offset
+    file.seekg(offset, std::ios::beg);
+    std::vector<uint8_t> buffer(contextSize);
+    file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+    size_t bytesRead = file.gcount();
+    buffer.resize(bytesRead);
+
+    if (buffer.empty()) {
+        output.push_back("EROARE: Nu am bytes pentru disassembly");
+        return output;
+    }
+
+    // 4️⃣ Capstone disassembly
+    csh handle;
+    if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK) {
+        output.push_back("EROARE: Capstone init failed");
+        return output;
+    }
+    cs_option(handle, CS_OPT_DETAIL, CS_OPT_OFF);
+
+    cs_insn* insn;
+    size_t count = cs_disasm(handle, buffer.data(), buffer.size(), offset, 0, &insn);
+
+    if (count > 0) {
+        output.push_back("Disassembly:");
+        for (size_t i = 0; i < count; i++) {
+            std::ostringstream line;
+            line << "0x" << std::setw(8) << std::setfill('0') << std::hex << insn[i].address << " " << insn[i].mnemonic << " " << insn[i].op_str;
+            output.push_back(line.str());
+        }
+    } else {
+        output.push_back("EROARE: Nu s-a putut disassembly");
+    }
+
+    cs_free(insn, count);
+    cs_close(&handle);
+
+    return output;
+}
+
 
 std::string Instance::GetSectionFromOffset(const std::string& exePath, uint64_t offset)
 {
