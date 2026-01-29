@@ -138,7 +138,8 @@ namespace GView::View::YaraViewer
         void SelectMatch(uint32 row, size_t startRawCol, uint32 length);
         bool FindNext();
 
-        std::vector<std::string> ExtractHexContextFromYaraMatch(const std::string& yaraLine, const std::string& exePath, size_t contextSize = 16);
+        std::vector<std::string> ExtractHexContextFromYaraMatch(const std::string& yaraLine, const std::string& exePath, size_t contextSize = 64);
+        std::string GetSectionFromOffset(const std::string& exePath, uint64_t offset);
 
     };
 

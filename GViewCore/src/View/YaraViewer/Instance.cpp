@@ -1336,7 +1336,46 @@ std::vector<std::string> Instance::ExtractHexContextFromYaraMatch(
     // 5️ Header cu offset original
     std::ostringstream header;
     header << "File offset: 0x" << std::hex << std::uppercase << offset;
-    output.insert(output.begin(), header.str());
 
+
+    std::ostringstream section;
+    std::string sectionName = GetSectionFromOffset(exePath, offset);
+    section << "Section: " << sectionName;
+
+    output.insert(output.begin(), header.str());
+    output.insert(output.begin(), section.str());
     return output;
+}
+
+std::string Instance::GetSectionFromOffset(const std::string& exePath, uint64_t offset)
+{
+    std::ifstream file(exePath, std::ios::binary);
+    if (!file)
+        return "UNKNOWN";
+
+    IMAGE_DOS_HEADER dos{};
+    file.read(reinterpret_cast<char*>(&dos), sizeof(dos));
+
+    if (dos.e_magic != IMAGE_DOS_SIGNATURE)
+        return "NOT_A_PE";
+
+    file.seekg(dos.e_lfanew, std::ios::beg);
+
+    IMAGE_NT_HEADERS nt{};
+    file.read(reinterpret_cast<char*>(&nt), sizeof(nt));
+
+    IMAGE_SECTION_HEADER section{};
+
+    for (int i = 0; i < nt.FileHeader.NumberOfSections; i++) {
+        file.read(reinterpret_cast<char*>(&section), sizeof(section));
+
+        DWORD start = section.PointerToRawData;
+        DWORD end   = start + section.SizeOfRawData;
+
+        if (offset >= start && offset < end) {
+            return std::string(reinterpret_cast<char*>(section.Name), strnlen(reinterpret_cast<char*>(section.Name), 8));
+        }
+    }
+
+    return "UNKNOWN";
 }
