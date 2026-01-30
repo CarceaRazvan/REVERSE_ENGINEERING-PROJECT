@@ -373,6 +373,51 @@ void Instance::OnAfterResize(int newWidth, int newHeight)
         layout.visibleLines--;
     layout.maxCharactersPerLine = GetWidth() - startingX /*left*/ - startingX /*right*/;
 }
+void Instance::AddMatchToUI(const std::string& ruleName, const std::string& tags, const std::string& author, const std::string& severity, const std::vector<std::string>& strings, const std::string& filePath)
+{
+    yaraLines.push_back({ "    [MATCH] Rule: " + ruleName, LineType::Match });
+    if (!tags.empty())
+        yaraLines.push_back({ "    Tags: " + tags, LineType::Normal });
+    if (!author.empty())
+        yaraLines.push_back({ "    Author: " + author, LineType::Normal });
+    if (!severity.empty())
+        yaraLines.push_back({ "    Severity: " + severity, LineType::Normal });
+
+    for (const auto& s : strings) {
+        yaraLines.push_back({ "        " + s, LineType::RuleContent });
+        yaraLines.push_back({ "        At:", LineType::Normal });
+
+        // Hex Context
+        auto ctx = ExtractHexContextFromYaraMatch(s, filePath);
+        for (auto& ctxPair : ctx) {
+            LineInfo infoLine;
+
+            std::string prefix = "           ";
+
+            if (ctxPair.first.find("0x") == 0) {
+                prefix += "    ";
+            }
+            infoLine.text = prefix + ctxPair.first;
+            infoLine.type = ctxPair.second;
+            yaraLines.push_back(infoLine);
+        }
+
+        // Disassembly
+        auto disasmLines = ExtractDisassemblyFromYaraMatch(s, filePath);
+        for (auto& disPair : disasmLines) {
+            LineInfo infoLine;
+            if (disPair.first.find("Disassembly:") != std::string::npos) {
+                infoLine.text = "           " + disPair.first;
+            } else {
+                infoLine.text = "               " + disPair.first;
+            }
+
+            infoLine.type = disPair.second;
+            yaraLines.push_back(infoLine);
+        }
+    }
+    yaraLines.push_back({ "", LineType::Normal });
+}
 
 
 // --- Serializare Setări ---
@@ -946,59 +991,6 @@ bool Instance::FindNext()
 }
 
 
-// Adaugă asta în clasa Instance (în .hpp și .cpp)
-void Instance::AddMatchToUI(
-      const std::string& ruleName,
-      const std::string& tags,
-      const std::string& author,
-      const std::string& severity,
-      const std::vector<std::string>& strings,
-      const std::string& filePath)
-{
-    yaraLines.push_back({ "    [MATCH] Rule: " + ruleName, LineType::Match });
-    if (!tags.empty())
-        yaraLines.push_back({ "    Tags: " + tags, LineType::Normal });
-    if (!author.empty())
-        yaraLines.push_back({ "    Author: " + author, LineType::Normal });
-    if (!severity.empty())
-        yaraLines.push_back({ "    Severity: " + severity, LineType::Normal });
-
-    for (const auto& s : strings) {
-        yaraLines.push_back({ "        " + s, LineType::RuleContent });
-        yaraLines.push_back({ "        At:", LineType::Normal });
-
-        // Hex Context
-        auto ctx = ExtractHexContextFromYaraMatch(s, filePath);
-        for (auto& ctxPair : ctx) {
-            LineInfo infoLine;
-
-            std::string prefix = "           ";
-
-            if (ctxPair.first.find("0x") == 0) {
-                prefix += "    ";
-            }
-            infoLine.text = prefix + ctxPair.first;
-            infoLine.type = ctxPair.second;
-            yaraLines.push_back(infoLine);
-        }
-
-        // Disassembly
-        auto disasmLines = ExtractDisassemblyFromYaraMatch(s, filePath);
-        for (auto& disPair : disasmLines) {
-            LineInfo infoLine;
-            if (disPair.first.find("Disassembly:") != std::string::npos) {
-                infoLine.text = "           " + disPair.first;
-            } else {
-                infoLine.text = "               " + disPair.first;
-            }
-
-            infoLine.type = disPair.second;
-            yaraLines.push_back(infoLine);
-        }
-    }
-    yaraLines.push_back({ "", LineType::Normal });
-}
-
 // --- Internal Logic Methods ---
 void Instance::RunYara()
 {
@@ -1394,7 +1386,7 @@ void Instance::GetRulesFiles()
     // Header info
     yaraLines.push_back({ "=== YARA RULES SELECTION ===", LineType::Normal });
     yaraLines.push_back({ "", LineType::Normal });
-    yaraLines.push_back({ "Controls:", LineType::Match });
+    yaraLines.push_back({ "Controls:", LineType::Normal });
     yaraLines.push_back({ "   [Space] or [Click] : Toggle selection", LineType::Normal });
     yaraLines.push_back({ "   [Enter]            : Expand/Collapse content", LineType::Normal });
     yaraLines.push_back({ "   [Ctrl + A]         : Select All", LineType::Normal });

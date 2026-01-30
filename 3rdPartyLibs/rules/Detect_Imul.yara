@@ -10,5 +10,9 @@ rule Detect_IMUL_Instruction
         $imul_triple_with_byte = { 6B (C? | D? | E? | F?) ?? } // imul reg, reg, imm8
 
     condition:
-        pe.is_pe and any of them in (pe.sections[pe.section_index(".text")].raw_data_offset .. pe.sections[pe.section_index(".text")].raw_data_offset + pe.sections[pe.section_index(".text")].raw_data_size)
+        pe.is_pe and any of them in (
+        pe.sections[pe.section_index(".text")].raw_data_offset .. 
+        pe.sections[pe.section_index(".text")].raw_data_offset + 
+        pe.sections[pe.section_index(".text")].raw_data_size
+    )
 }
