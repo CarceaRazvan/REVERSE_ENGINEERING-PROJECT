@@ -1,4 +1,7 @@
-rule Simple_C2_Beacon {
+rule C2_Beacon {
+    meta:
+        description = "Identifies indicators of simple HTTP-based C2 beaconing"
+
     strings:
         $url = /http(s)?:\/\/.*\/api/
         $beacon = "beacon"

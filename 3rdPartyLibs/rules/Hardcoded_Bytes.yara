@@ -1,6 +1,6 @@
-rule XOR_Encoded_String {
+rule Hardcoded_Bytes {
     meta:
-        description = "Detects XOR encoded payload"
+        description = "Detects hardcoded byte pattern "
         severity = "high"
 
     strings:
