@@ -56,7 +56,6 @@ endif()
 
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(core_testing)
-find_package(Yara REQUIRED)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -166,7 +165,6 @@ add_subdirectory(3rdPartyLibs/LLVMDemangle)
 add_subdirectory(AppCUI)
 add_subdirectory(GViewCore)
 
-target_link_libraries(GViewCore PRIVATE YARA::YARA)
 target_link_libraries(GViewCore PRIVATE Capstone)
 
 
