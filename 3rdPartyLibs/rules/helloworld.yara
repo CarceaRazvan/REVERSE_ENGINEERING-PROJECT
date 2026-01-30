@@ -30,19 +30,3 @@ rule world_str : malware demo{
         $world
 
 }
-
-rule world_str_andrei : trojan poc{
-
-    meta:
-        description = "Demo"
-        author = "Carcea Andrei"
-        severity = "very high"
-
-
-    strings:
-        $world = "World"
-
-    condition:
-        $world
-
-}

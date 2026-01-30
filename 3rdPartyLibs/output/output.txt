@@ -1,7 +1,4 @@
-hello_str [test,demo,poc] [description="A simple proof-of-concept to show YARA rules",author="Carcea Razvan",severity="low"] D:\REPOs\REVERSE_ENGINEERING-PROJECT\build\x64\Debug\TestYara.exe
-0x9828:$hello: Hello
-0x982e:$world: World
-world_str [malware,demo] [description="Demo",author="Carcea Diana",severity="high"] D:\REPOs\REVERSE_ENGINEERING-PROJECT\build\x64\Debug\TestYara.exe
-0x982e:$world: World
-world_str_andrei [trojan,poc] [description="Demo",author="Carcea Andrei",severity="very high"] D:\REPOs\REVERSE_ENGINEERING-PROJECT\build\x64\Debug\TestYara.exe
-0x982e:$world: World
+Detect_IMUL_Instruction [] [description="Detecteaza instructiuni IMUL (x86)"] D:\REPOs\REVERSE_ENGINEERING-PROJECT\3rdPartyLibs\viruses\p12
+0x46b:$imul_mem: 0F AF 45 F8
+0x475:$imul_mem: 0F AF 4D F8
+0x479:$imul_imm: 6B D1 03
