@@ -433,8 +433,10 @@ bool Instance::OnUpdateCommandBar(Application::CommandBar& commandBar)
     }
     commandBar.SetCommand(Commands::ViewRulesCommand.Key, Commands::ViewRulesCommand.Caption, Commands::ViewRulesCommand.CommandId);
     commandBar.SetCommand(Commands::EditRulesCommand.Key, Commands::EditRulesCommand.Caption, Commands::EditRulesCommand.CommandId);
-    commandBar.SetCommand(Commands::SelectAllCommand.Key, "Select All", Commands::SelectAllCommand.CommandId);
-    commandBar.SetCommand(Commands::DeselectAllCommand.Key, "Deselect All", Commands::DeselectAllCommand.CommandId);
+    if (!yaraExecuted) {
+        commandBar.SetCommand(Commands::SelectAllCommand.Key, "Select All", Commands::SelectAllCommand.CommandId);
+        commandBar.SetCommand(Commands::DeselectAllCommand.Key, "Deselect All", Commands::DeselectAllCommand.CommandId);
+    }
     commandBar.SetCommand(Commands::FindTextCommand.Key, "Find Text", Commands::FindTextCommand.CommandId);
 
     if (isButtonFindPressed) {
