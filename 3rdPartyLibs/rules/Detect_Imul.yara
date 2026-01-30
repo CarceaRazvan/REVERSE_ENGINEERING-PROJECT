@@ -6,9 +6,9 @@ rule Detect_IMUL_Instruction
         description = "Detecteaza instructiuni IMUL (x86)"
 
     strings:
-        $imul_mem = { 0F AF ?? ?? }   // imul reg, [mem]
-        $imul_imm = { 6B ?? ?? }      // imul reg, reg, imm8
+        $imul_standard_2ops = { 0F AF ?? ?? } // imul reg, [mem]
+        $imul_triple_with_byte = { 6B (C? | D? | E? | F?) ?? } // imul reg, reg, imm8
 
     condition:
-        pe.is_pe and any of them
+        pe.is_pe and any of them in (pe.sections[pe.section_index(".text")].raw_data_offset .. pe.sections[pe.section_index(".text")].raw_data_offset + pe.sections[pe.section_index(".text")].raw_data_size)
 }
