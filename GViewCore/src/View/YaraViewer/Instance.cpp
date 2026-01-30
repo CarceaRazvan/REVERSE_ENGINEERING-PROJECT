@@ -373,6 +373,51 @@ void Instance::OnAfterResize(int newWidth, int newHeight)
         layout.visibleLines--;
     layout.maxCharactersPerLine = GetWidth() - startingX /*left*/ - startingX /*right*/;
 }
+void Instance::AddMatchToUI(const std::string& ruleName, const std::string& tags, const std::string& author, const std::string& severity, const std::vector<std::string>& strings, const std::string& filePath)
+{
+    yaraLines.push_back({ "    [MATCH] Rule: " + ruleName, LineType::Match });
+    if (!tags.empty())
+        yaraLines.push_back({ "    Tags: " + tags, LineType::Normal });
+    if (!author.empty())
+        yaraLines.push_back({ "    Author: " + author, LineType::Normal });
+    if (!severity.empty())
+        yaraLines.push_back({ "    Severity: " + severity, LineType::Normal });
+
+    for (const auto& s : strings) {
+        yaraLines.push_back({ "        " + s, LineType::RuleContent });
+        yaraLines.push_back({ "        At:", LineType::Normal });
+
+        // Hex Context
+        auto ctx = ExtractHexContextFromYaraMatch(s, filePath);
+        for (auto& ctxPair : ctx) {
+            LineInfo infoLine;
+
+            std::string prefix = "           ";
+
+            if (ctxPair.first.find("0x") == 0) {
+                prefix += "    ";
+            }
+            infoLine.text = prefix + ctxPair.first;
+            infoLine.type = ctxPair.second;
+            yaraLines.push_back(infoLine);
+        }
+
+        // Disassembly
+        auto disasmLines = ExtractDisassemblyFromYaraMatch(s, filePath);
+        for (auto& disPair : disasmLines) {
+            LineInfo infoLine;
+            if (disPair.first.find("Disassembly:") != std::string::npos) {
+                infoLine.text = "           " + disPair.first;
+            } else {
+                infoLine.text = "               " + disPair.first;
+            }
+
+            infoLine.type = disPair.second;
+            yaraLines.push_back(infoLine);
+        }
+    }
+    yaraLines.push_back({ "", LineType::Normal });
+}
 
 
 // --- Serializare Setări ---
@@ -478,49 +523,67 @@ bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
 }
 bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
 {
-    if (keyCode == (Key::Ctrl | Key::C)) {  // Copy to Clipboard
+    if (keyCode == (Key::Ctrl | Key::C)) {
         CopySelectionToClipboard();
         return true;
     }
 
-    if (keyCode == Key::Space) {  //Bifare/Debifare reguli
+    if (visibleIndices.empty())
+        return false;
+
+    auto GetCurrentLine = [&]() -> LineInfo& {
+        size_t realIdx = visibleIndices[cursorRow];
+        return yaraLines[realIdx];
+    };
+
+    if (keyCode == Key::Space) {
         if (cursorRow < visibleIndices.size()) {
-            size_t realIndex = visibleIndices[cursorRow];
-            if (yaraLines[realIndex].type == LineType::FileHeader) {
-                yaraLines[realIndex].isChecked = !yaraLines[realIndex].isChecked;
+            auto& line = GetCurrentLine();
+            if (line.type == LineType::FileHeader) {
+                line.isChecked = !line.isChecked;
             }
         }
         return true;
     }
 
-    if (keyCode == Key::Enter) { // Expand/Collapse reguli
+    if (keyCode == Key::Enter) {
         if (cursorRow < visibleIndices.size()) {
-            size_t realIndex = visibleIndices[cursorRow];
-            if (yaraLines[realIndex].type == LineType::FileHeader) {
-                ToggleFold(realIndex);
+            size_t realIdx = visibleIndices[cursorRow];
+            if (yaraLines[realIdx].type == LineType::FileHeader) {
+                ToggleFold(realIdx);
             }
         }
         return true;
     }
 
-    if (keyCode == Key::Escape) { // Anulare selecție și căutare
+    if (keyCode == Key::Escape) {
         this->selectionActive     = false;
         this->searchActive        = false;
-        this->isButtonFindPressed = false; 
+        this->isButtonFindPressed = false;
         this->SetFocus();
         this->lastSearchText.clear();
         return true;
     }
 
-    // Navigare: miscarea cursorului
+    // Navigare și Scroll
+    uint32 pageHeight = this->GetHeight(); // Câte linii încap pe ecran
+
     switch (keyCode) {
-    case Key::Right:
-        if (cursorCol < yaraLines[cursorRow].text.length()) { 
+    case Key::Right: {
+        auto& line = GetCurrentLine(); 
+        if (cursorCol < line.text.length()) {
             cursorCol++;
-        } else if (cursorRow + 1 < yaraLines.size()) {
+        }
+        // Trecem la linia următoare doar dacă există în lista VIZIBILĂ
+        else if (cursorRow + 1 < visibleIndices.size()) {
             cursorRow++;
             cursorCol = 0;
+
+            // Check Scroll Jos la wrap-around
+            if (cursorRow >= startViewLine + pageHeight)
+                startViewLine++;
         }
+    }
         MoveTo();
         return true;
 
@@ -529,7 +592,13 @@ bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
             cursorCol--;
         else if (cursorRow > 0) {
             cursorRow--;
-            cursorCol = (uint32) yaraLines[cursorRow].text.length();
+            // Luăm lungimea liniei ANTERIOARE vizibile
+            size_t prevRealIdx = visibleIndices[cursorRow];
+            cursorCol          = (uint32) yaraLines[prevRealIdx].text.length();
+
+            // Check Scroll Sus la wrap-around
+            if (cursorRow < startViewLine)
+                startViewLine = cursorRow;
         }
         MoveTo();
         return true;
@@ -537,21 +606,65 @@ bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
     case Key::Down:
         if (cursorRow + 1 < visibleIndices.size()) {
             cursorRow++;
-            if (cursorCol > yaraLines[cursorRow].text.length())
-                cursorCol = (uint32) yaraLines[cursorRow].text.length();
+
+            // Ajustare coloană (să nu fim în afara textului noii linii)
+            auto& line = GetCurrentLine();
+            if (cursorCol > line.text.length())
+                cursorCol = (uint32) line.text.length();
+
+            // Dacă cursorul coboară sub partea de jos a ecranului, tragem imaginea în jos
+            if (cursorRow >= startViewLine + pageHeight) {
+                startViewLine++;
+            }
         }
-        MoveTo();
+        MoveTo(); // Actualizează poziția cursorului 
         return true;
 
     case Key::Up:
         if (cursorRow > 0) {
             cursorRow--;
-            if (cursorCol > yaraLines[cursorRow].text.length())
-                cursorCol = (uint32) yaraLines[cursorRow].text.length();
+
+            // Ajustare coloană
+            auto& line = GetCurrentLine();
+            if (cursorCol > line.text.length())
+                cursorCol = (uint32) line.text.length();
+
+            // Dacă cursorul urcă deasupra primei linii vizibile, tragem imaginea în sus
+            if (cursorRow < startViewLine) {
+                startViewLine = cursorRow;
+            }
+        }
+        MoveTo();
+        return true;
+
+    //  Page Up / Page Down pentru navigare rapidă
+    case Key::PageDown:
+        if (cursorRow + pageHeight < visibleIndices.size()) {
+            cursorRow += pageHeight;
+            startViewLine += pageHeight; // Scroll pagină întreagă
+        } else {
+            cursorRow = (uint32) visibleIndices.size() - 1;
+            if (visibleIndices.size() > pageHeight)
+                startViewLine = (uint32) visibleIndices.size() - pageHeight;
+        }
+        MoveTo();
+        return true;
+
+    case Key::PageUp:
+        if (cursorRow > pageHeight) {
+            cursorRow -= pageHeight;
+            if (startViewLine > pageHeight)
+                startViewLine -= pageHeight;
+            else
+                startViewLine = 0;
+        } else {
+            cursorRow     = 0;
+            startViewLine = 0;
         }
         MoveTo();
         return true;
     }
+
     return false;
 }
 
@@ -945,59 +1058,6 @@ bool Instance::FindNext()
     return false;
 }
 
-
-// Adaugă asta în clasa Instance (în .hpp și .cpp)
-void Instance::AddMatchToUI(
-      const std::string& ruleName,
-      const std::string& tags,
-      const std::string& author,
-      const std::string& severity,
-      const std::vector<std::string>& strings,
-      const std::string& filePath)
-{
-    yaraLines.push_back({ "    [MATCH] Rule: " + ruleName, LineType::Match });
-    if (!tags.empty())
-        yaraLines.push_back({ "    Tags: " + tags, LineType::Normal });
-    if (!author.empty())
-        yaraLines.push_back({ "    Author: " + author, LineType::Normal });
-    if (!severity.empty())
-        yaraLines.push_back({ "    Severity: " + severity, LineType::Normal });
-
-    for (const auto& s : strings) {
-        yaraLines.push_back({ "        " + s, LineType::RuleContent });
-        yaraLines.push_back({ "        At:", LineType::Normal });
-
-        // Hex Context
-        auto ctx = ExtractHexContextFromYaraMatch(s, filePath);
-        for (auto& ctxPair : ctx) {
-            LineInfo infoLine;
-
-            std::string prefix = "           ";
-
-            if (ctxPair.first.find("0x") == 0) {
-                prefix += "    ";
-            }
-            infoLine.text = prefix + ctxPair.first;
-            infoLine.type = ctxPair.second;
-            yaraLines.push_back(infoLine);
-        }
-
-        // Disassembly
-        auto disasmLines = ExtractDisassemblyFromYaraMatch(s, filePath);
-        for (auto& disPair : disasmLines) {
-            LineInfo infoLine;
-            if (disPair.first.find("Disassembly:") != std::string::npos) {
-                infoLine.text = "           " + disPair.first;
-            } else {
-                infoLine.text = "               " + disPair.first;
-            }
-
-            infoLine.type = disPair.second;
-            yaraLines.push_back(infoLine);
-        }
-    }
-    yaraLines.push_back({ "", LineType::Normal });
-}
 
 // --- Internal Logic Methods ---
 void Instance::RunYara()
@@ -1397,7 +1457,7 @@ void Instance::GetRulesFiles()
     // Header info
     yaraLines.push_back({ "=== YARA RULES SELECTION ===", LineType::Normal });
     yaraLines.push_back({ "", LineType::Normal });
-    yaraLines.push_back({ "Controls:", LineType::Match });
+    yaraLines.push_back({ "Controls:", LineType::Normal });
     yaraLines.push_back({ "   [Space] or [Click] : Toggle selection", LineType::Normal });
     yaraLines.push_back({ "   [Enter]            : Expand/Collapse content", LineType::Normal });
     yaraLines.push_back({ "   [Ctrl + A]         : Select All", LineType::Normal });
@@ -1610,12 +1670,13 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
     // --- INSERĂM LINIILE COLORATE ---
 
     // Titlu (Alb)
-    output.insert(output.begin(), { "Hex Dump:", LineType::Normal });
 
     // Offset (Verde - folosind LineType::Info)
-    output.insert(output.begin() + 1, { header.str(), LineType::OffsetHeader });
+    output.insert(output.begin(), { header.str(), LineType::OffsetHeader });
     // Secțiune (Alb)
-    output.insert(output.begin() + 2, { section.str(), LineType::Normal });
+    output.insert(output.begin() + 1, { section.str(), LineType::Normal });
+
+    output.insert(output.begin() + 2, { "Hex Dump:", LineType::Normal });
 
     return output;
 }

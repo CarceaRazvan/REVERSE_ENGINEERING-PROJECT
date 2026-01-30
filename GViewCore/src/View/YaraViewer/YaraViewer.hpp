@@ -129,13 +129,8 @@ namespace GView::View::YaraViewer
         void PaintCursorInformation(AppCUI::Graphics::Renderer& renderer, uint32 width, uint32 height) override;
         void Paint(Graphics::Renderer& renderer) override;
         void OnAfterResize(int newWidth, int newHeight) override;
-        void AddMatchToUI(
-              const std::string& ruleName,
-              const std::string& tags,
-              const std::string& author,
-              const std::string& severity,
-              const std::vector<std::string>& matchedStrings,
-              const std::string& filePath);
+        void AddMatchToUI(const std::string& ruleName, const std::string& tags, const std::string& author, const std::string& severity, const std::vector<std::string>& matchedStrings, const std::string& filePath);
+
         // --- Serializare Setări ---
         std::string_view GetCategoryNameForSerialization() const override;
         bool AddCategoryBeforePropertyNameWhenSerializing() const override;
