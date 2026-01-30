@@ -1187,7 +1187,7 @@ void Instance::RunYara()
                         yaraLines.push_back(infoLine);
                     }
 
-                    // 2️⃣ Disassembly
+                    // 2️ Disassembly
                     // Folosim aceeași extragere de offset din linia YARA
                     auto disasmLines = ExtractDisassemblyFromYaraMatch(s, currentFile.string());
                     for (auto& disPair : disasmLines) {
