@@ -166,12 +166,13 @@ void Instance::Paint(Graphics::Renderer& renderer)
     ColorPair arrowColor    = ColorPair{ Color::Gray, Color::Transparent };
     ColorPair marginColor   = ColorPair{ Color::Gray, Color::Transparent };
     ColorPair textSelection = ColorPair{ Color::Black, Color::Silver };
+    ColorPair warningColor  = ColorPair{ Color::Olive, Color::Transparent };
 
     ColorPair ruleBlockColor = ColorPair{ Color::Green, Color::Transparent };
     ColorPair checkboxColor  = ColorPair{ Color::Red, Color::Transparent };    // pt [x]
     ColorPair headerColor    = ColorPair{ Color::Yellow, Color::Transparent }; // pt nume fisier
     ColorPair infoColor      = ColorPair{ Color::Red, Color::Transparent };
-    ColorPair matchColor     = ColorPair{ Color::Yellow, Color::Transparent };
+    ColorPair matchColor     = ColorPair{ Color::Teal, Color::Transparent };
     ColorPair foldColor = ColorPair{ Color::Aqua, Color::Transparent };
 
     // 2. Dimensiuni Viewport & Layout
@@ -280,6 +281,8 @@ void Instance::Paint(Graphics::Renderer& renderer)
                     } else {
                         currentColor = textNormal;
                     }
+                } else if (info.type == LineType::Warning) { 
+                    currentColor = warningColor;
                 } else if (info.type == LineType::RuleContent)
                     currentColor = ruleBlockColor;
                 else if (info.type == LineType::Info)
@@ -943,6 +946,59 @@ bool Instance::FindNext()
 }
 
 
+// Adaugă asta în clasa Instance (în .hpp și .cpp)
+void Instance::AddMatchToUI(
+      const std::string& ruleName,
+      const std::string& tags,
+      const std::string& author,
+      const std::string& severity,
+      const std::vector<std::string>& strings,
+      const std::string& filePath)
+{
+    yaraLines.push_back({ "    [MATCH] Rule: " + ruleName, LineType::Match });
+    if (!tags.empty())
+        yaraLines.push_back({ "    Tags: " + tags, LineType::Normal });
+    if (!author.empty())
+        yaraLines.push_back({ "    Author: " + author, LineType::Normal });
+    if (!severity.empty())
+        yaraLines.push_back({ "    Severity: " + severity, LineType::Normal });
+
+    for (const auto& s : strings) {
+        yaraLines.push_back({ "        " + s, LineType::RuleContent });
+        yaraLines.push_back({ "        At:", LineType::Normal });
+
+        // Hex Context
+        auto ctx = ExtractHexContextFromYaraMatch(s, filePath);
+        for (auto& ctxPair : ctx) {
+            LineInfo infoLine;
+
+            std::string prefix = "           ";
+
+            if (ctxPair.first.find("0x") == 0) {
+                prefix += "    ";
+            }
+            infoLine.text = prefix + ctxPair.first;
+            infoLine.type = ctxPair.second;
+            yaraLines.push_back(infoLine);
+        }
+
+        // Disassembly
+        auto disasmLines = ExtractDisassemblyFromYaraMatch(s, filePath);
+        for (auto& disPair : disasmLines) {
+            LineInfo infoLine;
+            if (disPair.first.find("Disassembly:") != std::string::npos) {
+                infoLine.text = "           " + disPair.first;
+            } else {
+                infoLine.text = "               " + disPair.first;
+            }
+
+            infoLine.type = disPair.second;
+            yaraLines.push_back(infoLine);
+        }
+    }
+    yaraLines.push_back({ "", LineType::Normal });
+}
+
 // --- Internal Logic Methods ---
 void Instance::RunYara()
 {
@@ -1019,7 +1075,7 @@ void Instance::RunYara()
                               currentFile.string() +
                               "\" "
                               "> \"" +
-                              outputFile.string() + "\"\"";
+                              outputFile.string() + "\" 2>&1\"";
 
         SHELLEXECUTEINFOA shExecInfo{};
         shExecInfo.cbSize       = sizeof(SHELLEXECUTEINFOA);
@@ -1048,6 +1104,7 @@ void Instance::RunYara()
             std::string currentRule, currentTags, currentAuthor, currentSeverity;
 
             bool foundAnyInFile = false;
+            bool hasErrors      = false;
 
             while (std::getline(in, line)) {
                 while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
@@ -1057,61 +1114,117 @@ void Instance::RunYara()
 
                 foundAnyInFile = true;
 
-                // Detectăm linia header YARA: "rule_name [tags] [meta] path"
-                if (line.find(currentFile.string()) != std::string::npos && line.find('[') != std::string::npos && line.find(']') != std::string::npos) {
-                    // === DUMP REGULA PRECEDENTĂ (Dacă există) ===
-                    if (!currentRule.empty()) {
-                        globalMatchCount++;
-                        yaraLines.push_back({ "    [MATCH] Rule: " + currentRule, LineType::Match });
-                        if (!currentTags.empty())
-                            yaraLines.push_back({ "    Tags: " + currentTags, LineType::Normal });
-                        if (!currentAuthor.empty())
-                            yaraLines.push_back({ "    Author: " + currentAuthor, LineType::Normal });
-                        if (!currentSeverity.empty())
-                            yaraLines.push_back({ "    Severity: " + currentSeverity, LineType::Normal });
+                if (line.find("error:") != std::string::npos || line.find("syntax error") != std::string::npos) {
+                    hasErrors          = true;
+                    std::string prefix = "    [SYNTAX ERROR] ";
+      
+                    size_t posIn    = line.find(" in "); 
+                    size_t posColon = line.find("): ");  
 
-                        // Strings & Hex Context
-                        for (auto& s : matchedStrings) {
-                            yaraLines.push_back({ "        " + s, LineType::RuleContent }); // Fundal verde
-                            yaraLines.push_back({ "        At:", LineType::Normal });
+                    if (posIn != std::string::npos && posColon != std::string::npos) {
 
-                            // extragere hex dump
-                            auto ctx = ExtractHexContextFromYaraMatch(s, currentFile.string());
-                            for (auto& ctxPair : ctx) {
-                                LineInfo infoLine;
+                        std::string partContext = line.substr(0, posIn + 3);
+                        yaraLines.push_back({ prefix + partContext, LineType::Info });
 
-                                std::string prefix = "           ";
+                        size_t pathStart     = posIn + 4;
+                        size_t pathLength    = (posColon + 2) - pathStart;
+                        std::string partPath = line.substr(pathStart, pathLength);
 
-                                if (ctxPair.first.find("0x") == 0) {
-                                    prefix += "    ";
-                                }
+                        yaraLines.push_back({ "        " + partPath, LineType::Info });
 
-                                infoLine.text = prefix + ctxPair.first;
-                                infoLine.type = ctxPair.second;
+                        std::string partMsg = line.substr(posColon + 3);
+                        yaraLines.push_back({ "        " + partMsg, LineType::Info });
 
-                                yaraLines.push_back(infoLine);
-                            }
+                    } else {
 
-                            // 2 Disassembly
-                            auto disasmLines = ExtractDisassemblyFromYaraMatch(s, currentFile.string());
-                            for (auto& disPair : disasmLines) {
-                                LineInfo infoLine;
-                                if (disPair.first.find("Disassembly:") != std::string::npos) {
+                        std::string fullError = prefix + line;
+                        const size_t MAX_LEN  = 100;
 
-                                    
-                                    infoLine.text = "           " + disPair.first;
+                        if (fullError.length() <= MAX_LEN) {
+                            yaraLines.push_back({ fullError, LineType::Info });
+                        } else {
+                            size_t currentPos = 0;
+                            bool isFirstLine  = true;
+                            while (currentPos < fullError.length()) {
+                                size_t chunkLen  = (std::min)(MAX_LEN, fullError.length() - currentPos);
+                                std::string part = fullError.substr(currentPos, chunkLen);
+
+                                if (isFirstLine) {
+                                    yaraLines.push_back({ part, LineType::Info });
+                                    isFirstLine = false;
                                 } else {
-
-                                    infoLine.text = "               " + disPair.first;
+                                    yaraLines.push_back({ "            " + part, LineType::Info });
                                 }
-
-                                infoLine.type = disPair.second;
-
-                                yaraLines.push_back(infoLine);
+                                currentPos += chunkLen;
                             }
                         }
-                        yaraLines.push_back({ "", LineType::Normal });
                     }
+                    continue;
+                }
+
+                if (line.find("warning:") != std::string::npos) {
+                    std::string prefix = "    [WARNING] ";
+
+                    size_t posIn    = line.find(" in "); // Separă regula de cale
+                    size_t posColon = line.find("): ");  // Separă calea de mesaj
+
+                    if (posIn != std::string::npos && posColon != std::string::npos) {
+
+                        std::string partContext = line.substr(0, posIn + 3);
+                        yaraLines.push_back({ prefix + partContext, LineType::Warning });
+
+                        size_t pathStart     = posIn + 4;
+                        size_t pathLength    = (posColon + 2) - pathStart;
+                        std::string partPath = line.substr(pathStart, pathLength);
+
+                        yaraLines.push_back({ "        " + partPath, LineType::Warning });
+
+                        std::string partMsg = line.substr(posColon + 3);
+
+                        const size_t MAX_MSG_LEN = 90;
+                        if (partMsg.length() <= MAX_MSG_LEN) {
+                            yaraLines.push_back({ "        " + partMsg, LineType::Warning });
+                        } else {
+                            size_t currentPos = 0;
+                            while (currentPos < partMsg.length()) {
+                                size_t chunkLen   = (std::min)(MAX_MSG_LEN, partMsg.length() - currentPos);
+                                std::string chunk = partMsg.substr(currentPos, chunkLen);
+                                yaraLines.push_back({ "        " + chunk, LineType::Warning });
+                                currentPos += chunkLen;
+                            }
+                        }
+
+                    } else {
+                        std::string fullWarn = prefix + line;
+                        const size_t MAX_LEN = 100;
+
+                        size_t currentPos = 0;
+                        bool isFirstLine  = true;
+                        while (currentPos < fullWarn.length()) {
+                            size_t chunkLen  = (std::min)(MAX_LEN, fullWarn.length() - currentPos);
+                            std::string part = fullWarn.substr(currentPos, chunkLen);
+
+                            if (isFirstLine) {
+                                yaraLines.push_back({ part, LineType::Warning });
+                                isFirstLine = false;
+                            } else {
+                                yaraLines.push_back({ "            " + part, LineType::Warning });
+                            }
+                            currentPos += chunkLen;
+                        }
+                    }
+                    continue; 
+                }
+
+
+                if (line.find(currentFile.string()) != std::string::npos && line.find('[') != std::string::npos && line.find(']') != std::string::npos) {
+                    
+                    if (!currentRule.empty()) {
+                        globalMatchCount++;
+                        // APELĂM FUNCȚIA HELPER
+                        AddMatchToUI(currentRule, currentTags, currentAuthor, currentSeverity, matchedStrings, currentFile.string());
+                    }
+                    
 
                     // === RESETARE PENTRU REGULA NOUĂ ===
                     matchedStrings.clear();
@@ -1160,65 +1273,17 @@ void Instance::RunYara()
             // === DUMP ULTIMA REGULĂ DIN FIȘIER ===
             if (!currentRule.empty()) {
                 globalMatchCount++;
-                yaraLines.push_back({ "    [MATCH] Rule: " + currentRule, LineType::Normal });
-                if (!currentTags.empty())
-                    yaraLines.push_back({ "    Tags: " + currentTags, LineType::Normal });
-                if (!currentAuthor.empty())
-                    yaraLines.push_back({ "    Author: " + currentAuthor, LineType::Normal });
-                if (!currentSeverity.empty())
-                    yaraLines.push_back({ "    Severity: " + currentSeverity, LineType::Normal });
-
-                for (auto& s : matchedStrings) {
-                    yaraLines.push_back({ "        " + s, LineType::RuleContent });
-                    yaraLines.push_back({ "        At:", LineType::Normal });
-
-                    auto ctx = ExtractHexContextFromYaraMatch(s, currentFile.string());
-                    for (auto& ctxPair : ctx) {
-                        LineInfo infoLine;
-                        std::string prefix = "           ";
-
-                        if (ctxPair.first.find("0x") == 0) {
-                            prefix += "    ";
-                        }
-
-                        infoLine.text = prefix + ctxPair.first;
-                        infoLine.type = ctxPair.second;
-
-                        yaraLines.push_back(infoLine);
-                    }
-
-                    // 2️ Disassembly
-                    // Folosim aceeași extragere de offset din linia YARA
-                    auto disasmLines = ExtractDisassemblyFromYaraMatch(s, currentFile.string());
-                    for (auto& disPair : disasmLines) {
-                        // disPair.first  = textul instrucțiunii
-                        // disPair.second = tipul (Culoarea)
-
-                        LineInfo infoLine;
-                        // Adăugăm indentare doar dacă nu e titlul "Disassembly:" (opțional, estetic)
-                        if (disPair.first.find("Disassembly:") != std::string::npos) {
-                            // Titlul îl punem mai în stânga (indentare mai mică)
-                            infoLine.text = "           " + disPair.first;
-                        } else {
-                            // Instrucțiunile le punem mai în dreapta (indentare mare)
-                            infoLine.text = "               " + disPair.first;
-                        }
-
-                        // Setăm culoarea returnată de funcție
-                        infoLine.type = disPair.second;
-
-                        yaraLines.push_back(infoLine);
-                    }
-                }
-                yaraLines.push_back({ "", LineType::Normal });
+                AddMatchToUI(currentRule, currentTags, currentAuthor, currentSeverity, matchedStrings, currentFile.string());
             } else if (!foundAnyInFile) {
-                // Dacă nu a găsit nimic în acest fișier de reguli
+                yaraLines.push_back({ "    [CLEAN] No matches for this rule.", LineType::Normal });
+            } else if (!hasErrors && currentRule.empty()) {
+                // S-a scris ceva in fisier, dar nu am detectat "error:" si nici nu am parsat o regula.
+                // Poate fi Clean sau un output necunoscut.
                 yaraLines.push_back({ "    [CLEAN] No matches for this rule.", LineType::Normal });
             }
-
         } else {
             yaraLines.push_back({ "    [ERROR] Execution failed.", LineType::Normal });
-        }
+        } 
     }
 
     // ---------------------------------------------------------

@@ -53,9 +53,10 @@ namespace GView::View::YaraViewer
         Normal,
         FileHeader,  // Conține checkbox [ ] sau [x] și numele fișierului
         RuleContent, // Conținutul regulii (poate fi colorat diferit)
-        Info,        // Mesaje informative (galben/albastru)
+        Info,        // Mesaje informative 
         Match,       // Linii care indică o potrivire (MATCH)
-        OffsetHeader  // Header pentru offset-uri și context hex/disasm
+        OffsetHeader,// Header pentru offset-uri și context hex/disasm
+        Warning	     // Mesaje de avertizare (galben)
     };
 
     struct LineInfo {
@@ -128,7 +129,13 @@ namespace GView::View::YaraViewer
         void PaintCursorInformation(AppCUI::Graphics::Renderer& renderer, uint32 width, uint32 height) override;
         void Paint(Graphics::Renderer& renderer) override;
         void OnAfterResize(int newWidth, int newHeight) override;
-
+        void AddMatchToUI(
+              const std::string& ruleName,
+              const std::string& tags,
+              const std::string& author,
+              const std::string& severity,
+              const std::vector<std::string>& matchedStrings,
+              const std::string& filePath);
         // --- Serializare Setări ---
         std::string_view GetCategoryNameForSerialization() const override;
         bool AddCategoryBeforePropertyNameWhenSerializing() const override;
