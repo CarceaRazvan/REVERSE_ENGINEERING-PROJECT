@@ -1599,12 +1599,13 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
     // --- INSERĂM LINIILE COLORATE ---
 
     // Titlu (Alb)
-    output.insert(output.begin(), { "Hex Dump:", LineType::Normal });
 
     // Offset (Verde - folosind LineType::Info)
-    output.insert(output.begin() + 1, { header.str(), LineType::OffsetHeader });
+    output.insert(output.begin(), { header.str(), LineType::OffsetHeader });
     // Secțiune (Alb)
-    output.insert(output.begin() + 2, { section.str(), LineType::Normal });
+    output.insert(output.begin() + 1, { section.str(), LineType::Normal });
+
+    output.insert(output.begin() + 2, { "Hex Dump:", LineType::Normal });
 
     return output;
 }
