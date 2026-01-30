@@ -1370,20 +1370,23 @@ std::string Instance::GetSectionFromOffset(const std::string& exePath, uint64_t 
     if (!file)
         return "UNKNOWN";
 
-    // 1️ DOS Header
+    // 1️ DOS Header (MZ)
     IMAGE_DOS_HEADER dos{};
     file.read(reinterpret_cast<char*>(&dos), sizeof(dos));
+    // Verificăm semnătura "MZ"
     if (dos.e_magic != IMAGE_DOS_SIGNATURE)
         return "NOT_A_PE";
 
-    // 2️ NT Headers
+    // 2️ Ne mutăm la offset-ul NT Headers (dat de DOS)
     file.seekg(dos.e_lfanew, std::ios::beg);
     DWORD signature = 0;
     file.read(reinterpret_cast<char*>(&signature), sizeof(signature));
     if (signature != IMAGE_NT_SIGNATURE)
         return "NOT_A_PE";
 
+
     // Citim File Header
+    // Header-ul care conține numărul de secțiuni etc.
     IMAGE_FILE_HEADER fileHeader{};
     file.read(reinterpret_cast<char*>(&fileHeader), sizeof(fileHeader));
 
