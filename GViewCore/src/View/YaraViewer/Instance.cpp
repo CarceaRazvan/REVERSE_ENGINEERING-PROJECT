@@ -1063,7 +1063,7 @@ void Instance::RunYara()
 
         // Separator vizual între reguli
         yaraLines.push_back({ "-------------------------------------------------------------", LineType::Normal });
-        yaraLines.push_back({ "Scanning with rule: " + ruleName, LineType::Info }); // Folosim FileHeader ca să apară colorat (chiar dacă nu e checkbox)
+        yaraLines.push_back({ "Scanning with rule: " + ruleName, LineType::Info });
 
         // Comanda YARA
         std::string cmdArgs = "/C \"\"" + yaraExe.string() +
@@ -1079,12 +1079,12 @@ void Instance::RunYara()
 
         SHELLEXECUTEINFOA shExecInfo{};
         shExecInfo.cbSize       = sizeof(SHELLEXECUTEINFOA);
-        shExecInfo.fMask        = SEE_MASK_NOCLOSEPROCESS;
+        shExecInfo.fMask        = SEE_MASK_NOCLOSEPROCESS; // pentru a astepta procesul
         shExecInfo.hwnd         = nullptr;
-        shExecInfo.lpVerb       = "open";
-        shExecInfo.lpFile       = "cmd.exe";
-        shExecInfo.lpParameters = cmdArgs.c_str();
-        shExecInfo.nShow        = SW_HIDE;
+        shExecInfo.lpVerb       = "open"; // rulare / deschide
+        shExecInfo.lpFile       = "cmd.exe"; // ce se ruleaza
+        shExecInfo.lpParameters = cmdArgs.c_str(); // parametrii
+        shExecInfo.nShow        = SW_HIDE; // fara afisare cmd
 
         if (ShellExecuteExA(&shExecInfo)) {
             WaitForSingleObject(shExecInfo.hProcess, INFINITE);
@@ -1303,27 +1303,29 @@ void Instance::RunYara()
 }
 std::string Instance::GetSectionFromOffset(const std::string& exePath, uint64_t offset)
 {
+    // // Deschidem fișierul EXE în modul binar
     std::ifstream file(exePath, std::ios::binary);
     if (!file)
         return "UNKNOWN";
 
-    // 1️⃣ DOS Header
+    // 1️ DOS Header
     IMAGE_DOS_HEADER dos{};
     file.read(reinterpret_cast<char*>(&dos), sizeof(dos));
     if (dos.e_magic != IMAGE_DOS_SIGNATURE)
         return "NOT_A_PE";
 
-    // 2️⃣ NT Headers
+    // 2️ NT Headers
     file.seekg(dos.e_lfanew, std::ios::beg);
     DWORD signature = 0;
     file.read(reinterpret_cast<char*>(&signature), sizeof(signature));
     if (signature != IMAGE_NT_SIGNATURE)
         return "NOT_A_PE";
 
+    // Citim File Header
     IMAGE_FILE_HEADER fileHeader{};
     file.read(reinterpret_cast<char*>(&fileHeader), sizeof(fileHeader));
 
-    // 3️⃣ Detect 32-bit vs 64-bit
+    // 3️ Detect 32-bit vs 64-bit
     IMAGE_OPTIONAL_HEADER32 optional32{};
     IMAGE_OPTIONAL_HEADER64 optional64{};
     bool is64 = false;
@@ -1334,24 +1336,30 @@ std::string Instance::GetSectionFromOffset(const std::string& exePath, uint64_t 
     if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
         file.read(reinterpret_cast<char*>(&optional32), sizeof(optional32));
         is64 = false;
+
     } else if (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
         file.read(reinterpret_cast<char*>(&optional64), sizeof(optional64));
         is64 = true;
+
     } else {
         return "UNKNOWN";
     }
 
-    // 4️⃣ Secțiuni
+    // 4️ Secțiuni
     std::vector<IMAGE_SECTION_HEADER> sections(fileHeader.NumberOfSections);
+
+    // iteram peste toate secțiunile
     for (int i = 0; i < fileHeader.NumberOfSections; i++) {
         file.read(reinterpret_cast<char*>(&sections[i]), sizeof(IMAGE_SECTION_HEADER));
     }
 
-    // 5️⃣ Căutăm secțiunea pentru offset
+    // 5️ Căutăm secțiunea pentru offset
     for (const auto& sec : sections) {
         DWORD start = sec.PointerToRawData;
         DWORD end   = start + sec.SizeOfRawData;
         if (offset >= start && offset < end) {
+
+            // Returnează numele secțiunii
             return std::string(reinterpret_cast<const char*>(sec.Name), strnlen(reinterpret_cast<const char*>(sec.Name), 8));
         }
     }
@@ -1501,7 +1509,8 @@ void Instance::ExportResults()
 std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance::ExtractHexContextFromYaraMatch(
       const std::string& yaraLine, const std::string& exePath, size_t contextSize)
 {
-    // Folosim namespace-ul complet și aici pentru siguranță
+
+
     std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> output;
 
     // 1. Extragem offset-ul (0x....)
@@ -1512,13 +1521,14 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
     std::string offsetStr = yaraLine.substr(0, pos);
     uint64_t offset       = 0;
     try {
+        // convertire în număr baza 16
         offset = std::stoull(offsetStr, nullptr, 16);
     } catch (...) {
         output.push_back({ "EROARE: Offset invalid în linia YARA.", LineType::Normal });
         return output;
     }
 
-    // 2. Deschidem fișierul EXE
+    // 2. Deschidem fișierul EXE in mod binar
     std::ifstream file(exePath, std::ios::binary);
     if (!file.is_open()) {
         output.push_back({ "EROARE: Nu pot deschide fișierul.", LineType::Normal });
@@ -1529,10 +1539,14 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
     uint64_t startOffset = (offset > contextSize) ? offset - contextSize : 0;
     size_t readSize      = contextSize * 2;
 
+    // mutam offsetul de citire la pozitia startOffset fata de începutul fisierului
     file.seekg(startOffset, std::ios::beg);
 
+    // citim zona de interes în buffer
     std::vector<uint8_t> buffer(readSize);
     file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+
+    //cati bytes s-au citit efectiv (poate fi mai puțin la sfarsitul fisierului)
     size_t bytesRead = file.gcount();
 
     // 4. Format HEX + ASCII
@@ -1544,8 +1558,18 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
         // Construim conținutul liniei (Hex + ASCII)
         for (size_t j = 0; j < lineSize; j++) {
             if (i + j < bytesRead) {
+
+                // luam byte-ul
                 uint8_t b = buffer[i + j];
+
+                // std::setw(2) - afișăm exact 2 caractere pentru fiecare byte
+                // std::setfill('0') - dacă byte-ul are doar un caracter (A), îl completam cu 0 (0A)
+                // std::hex - afișăm în hexazecimal
+                // std::uppercase - litere mari (A-F)
+                // static_cast<int>(b) - byte-ul convertit la int ca să nu fie interpretat ca caracter
                 line << std::setw(2) << std::setfill('0') << std::hex << std::uppercase << static_cast<int>(b) << ' ';
+
+                //std::isprint(b) - verificare dacă byte-ul este caracter imprimabil (A-Z, 0-9, simboluri)
                 ascii << (std::isprint(b) ? static_cast<char>(b) : '.');
             } else {
                 line << "   ";
@@ -1558,9 +1582,8 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
 
         fullLine << "0x" << std::setw(8) << std::setfill('0') << std::hex << currentLineAddr << "  " << line.str() << " " << ascii.str();
 
-        // --- AICI ESTE MODIFICAREA PENTRU VERDE ---
 
-        // Implicit linia este Albă (Normal)
+        // implicit linia este albă (Normala)
         GView::View::YaraViewer::LineType currentType = GView::View::YaraViewer::LineType::Normal;
 
         // Verificăm dacă offset-ul căutat (cel din Yara match) se află pe această linie
@@ -1573,7 +1596,7 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
         output.push_back({ fullLine.str(), currentType });
     }
 
-    // 5. Header-ul cu offset (ACESTA VA FI ROȘU)
+    // 5. Header-ul cu offset (verde)
     std::ostringstream header;
     header << "File offset: 0x" << std::hex << std::uppercase << offset;
 
@@ -1588,7 +1611,7 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
 
     // Offset (Verde - folosind LineType::Info)
     output.insert(output.begin() + 1, { header.str(), LineType::OffsetHeader });
-    // Secțiune (Alb sau Roșu, cum preferi - aici e Normal)
+    // Secțiune (Alb)
     output.insert(output.begin() + 2, { section.str(), LineType::Normal });
 
     return output;
@@ -1598,7 +1621,7 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
 std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance::ExtractDisassemblyFromYaraMatch(
       const std::string& yaraLine, const std::string& exePath, size_t contextSize) // total bytes pentru disassembly
 {
-    // Returnăm perechi (Text, Culoare)
+    // Returnăm perechi (Text, LineType)
     std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> output;
 
     // 1. Extragem offset-ul din linia YARA
@@ -1609,6 +1632,7 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
     std::string offsetStr = yaraLine.substr(0, pos);
     uint64_t offset       = 0;
     try {
+        // convertire în număr baza 16
         offset = std::stoull(offsetStr, nullptr, 16);
     } catch (...) {
         output.push_back({ "EROARE: Offset invalid", LineType::Normal });
@@ -1622,7 +1646,7 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
         return output;
     }
 
-    // 2. Deschidem fișierul
+    // 2. Deschidem fișierul in mod binar
     std::ifstream file(exePath, std::ios::binary);
     if (!file.is_open()) {
         output.push_back({ "EROARE: Nu pot deschide fișierul", LineType::Normal });
@@ -1630,10 +1654,18 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
     }
 
     // 3. Citim buffer de la offset
+
+    // mutam offsetul de citire la pozitia startOffset fata de începutul fisierului
     file.seekg(offset, std::ios::beg);
+   
+    // citim zona de interes în buffer
     std::vector<uint8_t> buffer(contextSize);
     file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+   
+    // cati bytes s-au citit efectiv (poate fi mai puțin la sfarsitul fisierului)
     size_t bytesRead = file.gcount();
+
+    // ajustează mărimea vectorului exact la câți bytes am citit
     buffer.resize(bytesRead);
 
     if (buffer.empty()) {
@@ -1642,28 +1674,56 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
     }
 
     // 4. Capstone disassembly
+
+    // handle sesiunee curentă
     csh handle;
+
+    // inițializare Capstone pentru arhitectura x86 64-bit
+    // CS_ARCH_X86 - arhitectura procesorului
+    // CS_MODE_64 - modul 64-bit
+    // Returnează CS_ERR_OK dacă inițializarea e reușită
     if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK) {
         output.push_back({ "EROARE: Capstone init failed", LineType::Normal });
         return output;
     }
+
+    // CS_OPT_DETAIL, CS_OPT_OFF
+    // nu vrem detalii suplimentare (precum registre folosite, flags etc.), doar instrucțiunea simplă.
     cs_option(handle, CS_OPT_DETAIL, CS_OPT_OFF);
 
+    // pointer la structurile care vor conține instrucțiunile dezasamblate
     cs_insn* insn;
+
+
     // Dezasamblăm bufferul, considerând că începe la adresa 'offset'
-    size_t count = cs_disasm(handle, buffer.data(), buffer.size(), offset, 0, &insn);
+    // count - numărul de instrucțiuni dezasamblate
+    size_t count = cs_disasm(
+        handle,
+        buffer.data(),  // pointer la bytes
+        buffer.size(),  // câți bytes citim
+        offset,         // adresă de start (pentru afișare în output)
+        0,              // număr maxim de instrucțiuni (0 = toate)
+        &insn           // pointer unde se scriu instrucțiunile
+    );
 
     if (count > 0) {
         output.push_back({ "Disassembly:", LineType::Normal });
 
+        // Iterăm prin instrucțiuni
         for (size_t i = 0; i < count; i++) {
+
+            // insn[i]:
+                // address - adresa instrucțiunii în fișier
+                // mnemonic - instrucțiunea (mov, add, jmp etc.)
+                // op_str - operanzii (eax, ebx, etc.)
+
+
             std::ostringstream line;
             line << "0x" << std::setw(8) << std::setfill('0') << std::hex << insn[i].address << " " << insn[i].mnemonic << " " << insn[i].op_str;
 
-            // --- AICI ESTE LOGICA DE COLORARE ---
             GView::View::YaraViewer::LineType lineType = GView::View::YaraViewer::LineType::Normal;
 
-            // Dacă adresa instrucțiunii este exact offset-ul căutat -> VERDE (RuleContent)
+            // dacă adresa instrucțiunii este exact offset-ul căutat -> VERDE (RuleContent)
             if (insn[i].address == offset) {
                 lineType = GView::View::YaraViewer::LineType::RuleContent;
             }
@@ -1674,6 +1734,7 @@ std::vector<std::pair<std::string, GView::View::YaraViewer::LineType>> Instance:
         output.push_back({ "EROARE: Nu s-a putut disassembly", LineType::Normal });
     }
 
+    // Curățare
     cs_free(insn, count);
     cs_close(&handle);
 
