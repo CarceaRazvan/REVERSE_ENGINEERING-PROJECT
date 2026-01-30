@@ -523,49 +523,67 @@ bool Instance::OnEvent(Reference<Control>, Event eventType, int ID)
 }
 bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
 {
-    if (keyCode == (Key::Ctrl | Key::C)) {  // Copy to Clipboard
+    if (keyCode == (Key::Ctrl | Key::C)) {
         CopySelectionToClipboard();
         return true;
     }
 
-    if (keyCode == Key::Space) {  //Bifare/Debifare reguli
+    if (visibleIndices.empty())
+        return false;
+
+    auto GetCurrentLine = [&]() -> LineInfo& {
+        size_t realIdx = visibleIndices[cursorRow];
+        return yaraLines[realIdx];
+    };
+
+    if (keyCode == Key::Space) {
         if (cursorRow < visibleIndices.size()) {
-            size_t realIndex = visibleIndices[cursorRow];
-            if (yaraLines[realIndex].type == LineType::FileHeader) {
-                yaraLines[realIndex].isChecked = !yaraLines[realIndex].isChecked;
+            auto& line = GetCurrentLine();
+            if (line.type == LineType::FileHeader) {
+                line.isChecked = !line.isChecked;
             }
         }
         return true;
     }
 
-    if (keyCode == Key::Enter) { // Expand/Collapse reguli
+    if (keyCode == Key::Enter) {
         if (cursorRow < visibleIndices.size()) {
-            size_t realIndex = visibleIndices[cursorRow];
-            if (yaraLines[realIndex].type == LineType::FileHeader) {
-                ToggleFold(realIndex);
+            size_t realIdx = visibleIndices[cursorRow];
+            if (yaraLines[realIdx].type == LineType::FileHeader) {
+                ToggleFold(realIdx);
             }
         }
         return true;
     }
 
-    if (keyCode == Key::Escape) { // Anulare selecție și căutare
+    if (keyCode == Key::Escape) {
         this->selectionActive     = false;
         this->searchActive        = false;
-        this->isButtonFindPressed = false; 
+        this->isButtonFindPressed = false;
         this->SetFocus();
         this->lastSearchText.clear();
         return true;
     }
 
-    // Navigare: miscarea cursorului
+    // Navigare și Scroll
+    uint32 pageHeight = this->GetHeight(); // Câte linii încap pe ecran
+
     switch (keyCode) {
-    case Key::Right:
-        if (cursorCol < yaraLines[cursorRow].text.length()) { 
+    case Key::Right: {
+        auto& line = GetCurrentLine(); 
+        if (cursorCol < line.text.length()) {
             cursorCol++;
-        } else if (cursorRow + 1 < yaraLines.size()) {
+        }
+        // Trecem la linia următoare doar dacă există în lista VIZIBILĂ
+        else if (cursorRow + 1 < visibleIndices.size()) {
             cursorRow++;
             cursorCol = 0;
+
+            // Check Scroll Jos la wrap-around
+            if (cursorRow >= startViewLine + pageHeight)
+                startViewLine++;
         }
+    }
         MoveTo();
         return true;
 
@@ -574,7 +592,13 @@ bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
             cursorCol--;
         else if (cursorRow > 0) {
             cursorRow--;
-            cursorCol = (uint32) yaraLines[cursorRow].text.length();
+            // Luăm lungimea liniei ANTERIOARE vizibile
+            size_t prevRealIdx = visibleIndices[cursorRow];
+            cursorCol          = (uint32) yaraLines[prevRealIdx].text.length();
+
+            // Check Scroll Sus la wrap-around
+            if (cursorRow < startViewLine)
+                startViewLine = cursorRow;
         }
         MoveTo();
         return true;
@@ -582,21 +606,65 @@ bool Instance::OnKeyEvent(AppCUI::Input::Key keyCode, char16 charCode)
     case Key::Down:
         if (cursorRow + 1 < visibleIndices.size()) {
             cursorRow++;
-            if (cursorCol > yaraLines[cursorRow].text.length())
-                cursorCol = (uint32) yaraLines[cursorRow].text.length();
+
+            // Ajustare coloană (să nu fim în afara textului noii linii)
+            auto& line = GetCurrentLine();
+            if (cursorCol > line.text.length())
+                cursorCol = (uint32) line.text.length();
+
+            // Dacă cursorul coboară sub partea de jos a ecranului, tragem imaginea în jos
+            if (cursorRow >= startViewLine + pageHeight) {
+                startViewLine++;
+            }
         }
-        MoveTo();
+        MoveTo(); // Actualizează poziția cursorului 
         return true;
 
     case Key::Up:
         if (cursorRow > 0) {
             cursorRow--;
-            if (cursorCol > yaraLines[cursorRow].text.length())
-                cursorCol = (uint32) yaraLines[cursorRow].text.length();
+
+            // Ajustare coloană
+            auto& line = GetCurrentLine();
+            if (cursorCol > line.text.length())
+                cursorCol = (uint32) line.text.length();
+
+            // Dacă cursorul urcă deasupra primei linii vizibile, tragem imaginea în sus
+            if (cursorRow < startViewLine) {
+                startViewLine = cursorRow;
+            }
+        }
+        MoveTo();
+        return true;
+
+    //  Page Up / Page Down pentru navigare rapidă
+    case Key::PageDown:
+        if (cursorRow + pageHeight < visibleIndices.size()) {
+            cursorRow += pageHeight;
+            startViewLine += pageHeight; // Scroll pagină întreagă
+        } else {
+            cursorRow = (uint32) visibleIndices.size() - 1;
+            if (visibleIndices.size() > pageHeight)
+                startViewLine = (uint32) visibleIndices.size() - pageHeight;
+        }
+        MoveTo();
+        return true;
+
+    case Key::PageUp:
+        if (cursorRow > pageHeight) {
+            cursorRow -= pageHeight;
+            if (startViewLine > pageHeight)
+                startViewLine -= pageHeight;
+            else
+                startViewLine = 0;
+        } else {
+            cursorRow     = 0;
+            startViewLine = 0;
         }
         MoveTo();
         return true;
     }
+
     return false;
 }
 
